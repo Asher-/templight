@@ -20,7 +20,12 @@
 #include "clang/Driver/Compilation.h"
 #include "clang/Driver/Driver.h"
 #include "clang/Driver/DriverDiagnostic.h"
+#if __has_include("clang/Options/Options.h")
+#include "clang/Options/Options.h"
+namespace clang { namespace driver { namespace options = clang::options; } }
+#else
 #include "clang/Driver/Options.h"
+#endif
 #include "clang/Driver/Tool.h"
 #include "clang/Frontend/ChainedDiagnosticConsumer.h"
 #include "clang/Frontend/CompilerInstance.h"
@@ -263,8 +268,9 @@ ParsedClangName getTargetAndModeFromProgramName(StringRef PN) {
   StringRef Prefix(ProgName);
   Prefix = Prefix.slice(0, LastComponent);
   std::string IgnoredError;
+  llvm::Triple Triple(Prefix);
   bool IsRegistered =
-      llvm::TargetRegistry::lookupTarget(std::string(Prefix), IgnoredError);
+      (llvm::TargetRegistry::lookupTarget(Triple, IgnoredError) != nullptr);
   return ParsedClangName{std::string(Prefix), ModeSuffix, DS->ModeFlag,
                          IsRegistered};
 }
@@ -496,10 +502,11 @@ static void ExecuteTemplightCommand(
     if (Clang->getHeaderSearchOpts().UseBuiltinIncludes &&
         Clang->getHeaderSearchOpts().ResourceDir.empty())
       Clang->getHeaderSearchOpts().ResourceDir =
-          CompilerInvocation::GetResourcesPath(Argv0, GetExecutablePathVP);
+          GetResourcesPath(Argv0, GetExecutablePathVP);
 
     // Create the compilers actual diagnostics engine.
-    Clang->createDiagnostics(*llvm::vfs::getRealFileSystem());
+    Clang->setDiagnostics(CompilerInstance::createDiagnostics(
+        *llvm::vfs::getRealFileSystem(), Clang->getDiagnosticOpts()));
     if (!Clang->hasDiagnostics()) {
       FailingCommands.push_back(std::make_pair(1, &J));
       return;
@@ -605,7 +612,8 @@ int main(int argc_, const char **argv_) {
   // scenes.
   if (const char *OverrideStr = ::getenv("CCC_OVERRIDE_OPTIONS")) {
     // FIXME: Driver shouldn't take extra initial argument.
-    clang::driver::applyOverrideOptions(Args, OverrideStr, SavedStrings, &llvm::errs());
+    clang::driver::applyOverrideOptions(Args, OverrideStr, SavedStrings,
+                                        "CCC_OVERRIDE_OPTIONS", &llvm::errs());
   }
 
   // Separate out templight and clang flags.  templight flags are "-Xtemplight
@@ -650,21 +658,19 @@ int main(int argc_, const char **argv_) {
 
   std::string Path = GetExecutablePath(ClangArgs[0], CanonicalPrefixes);
 
-  IntrusiveRefCntPtr<DiagnosticOptions> DiagOpts =
+  std::unique_ptr<DiagnosticOptions> DiagOpts =
       CreateAndPopulateDiagOpts(ClangArgs);
 
   TextDiagnosticPrinter *DiagClient =
-      new TextDiagnosticPrinter(llvm::errs(), &*DiagOpts);
+      new TextDiagnosticPrinter(llvm::errs(), *DiagOpts);
   FixupDiagPrefixExeName(DiagClient, Path);
 
-  IntrusiveRefCntPtr<DiagnosticIDs> DiagID(new DiagnosticIDs());
-
-  DiagnosticsEngine Diags(DiagID, &*DiagOpts, DiagClient);
+  DiagnosticsEngine Diags(DiagnosticIDs::create(), *DiagOpts, DiagClient);
 
   if (!DiagOpts->DiagnosticSerializationFile.empty()) {
     auto SerializedConsumer =
         clang::serialized_diags::create(DiagOpts->DiagnosticSerializationFile,
-                                        &*DiagOpts, /*MergeChildRecords=*/true);
+                                        *DiagOpts, /*MergeChildRecords=*/true);
     Diags.setClient(new ChainedDiagnosticConsumer(
         Diags.takeClient(), std::move(SerializedConsumer)));
   }
@@ -703,11 +709,11 @@ int main(int argc_, const char **argv_) {
     if (Clang->getHeaderSearchOpts().UseBuiltinIncludes &&
         Clang->getHeaderSearchOpts().ResourceDir.empty())
       Clang->getHeaderSearchOpts().ResourceDir =
-          CompilerInvocation::GetResourcesPath(ClangArgs[0],
-                                               GetExecutablePathVP);
+          GetResourcesPath(ClangArgs[0], GetExecutablePathVP);
 
     // Create the compilers actual diagnostics engine.
-    Clang->createDiagnostics(*llvm::vfs::getRealFileSystem());
+    Clang->setDiagnostics(CompilerInstance::createDiagnostics(
+        *llvm::vfs::getRealFileSystem(), Clang->getDiagnosticOpts()));
     if (!Clang->hasDiagnostics()) {
       return 1;
     }
