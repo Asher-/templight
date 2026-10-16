@@ -299,7 +299,7 @@ public:
               if (!cur_result.Name.empty())
                 cur_result.Name += " with value ";
               if (VarDecl *vardecl = dyn_cast<VarDecl>(vdecl)) {
-                if (APValue *valptr = vardecl->evaluateValue()) {
+                if (const APValue *valptr = vardecl->evaluateValue()) {
                   llvm::raw_string_ostream OS_arg(cur_result.Name);
                   valptr->printPretty(OS_arg, TheSema.getASTContext(),
                                       vdecl->getType());
@@ -444,7 +444,7 @@ public:
                   if (!cur_result.Name.empty())
                     cur_result.Name += " with value ";
                   if (VarDecl *vardecl = dyn_cast<VarDecl>(vdecl)) {
-                    if (APValue *valptr = vardecl->evaluateValue()) {
+                    if (const APValue *valptr = vardecl->evaluateValue()) {
                       llvm::raw_string_ostream OS_arg(cur_result.Name);
                       valptr->printPretty(OS_arg, TheSema.getASTContext(),
                                           vdecl->getType());
