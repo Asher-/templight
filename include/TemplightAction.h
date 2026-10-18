@@ -43,7 +43,9 @@ public:
                                           const std::string &OptOutputName,
                                           bool OptInstProfiler,
                                           bool OptOutputToStdOut,
-                                          bool OptMemoryProfile);
+                                          bool OptMemoryProfile,
+                                          const std::string &OptFormat =
+                                              "protobuf");
 
   unsigned InstProfiler : 1;
   unsigned OutputToStdOut : 1;
@@ -53,6 +55,7 @@ public:
   unsigned InteractiveDebug : 1;
   std::string OutputFilename;
   std::string BlackListFilename;
+  std::string OutputFormat = "protobuf";
 
 private:
   void EnsureHasSema(CompilerInstance &CI);

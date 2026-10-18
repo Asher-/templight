@@ -35,11 +35,20 @@ private:
   std::unique_ptr<TracePrinter> Printer;
 
 public:
-  /// \brief Sets the format type of the template trace file.
-  /// The argument can be xml/yaml/text
+  /// \brief Writes the template trace to Output in Format, one of the names
+  /// isFormat() accepts.
   TemplightTracer(const Sema &TheSema, std::string Output = "",
                   bool Memory = false, bool Safemode = false,
-                  bool IgnoreSystem = false);
+                  bool IgnoreSystem = false,
+                  const std::string &Format = "protobuf");
+
+  /// Whether Format names a trace format: protobuf, yaml, xml, text,
+  /// nestedxml, graphml or graphviz.
+  static bool isFormat(const std::string &Format);
+  /// The accepted format names, comma-separated, for diagnostics.
+  static const char *formatList();
+  /// The trace file extension for Format (pbf for protobuf).
+  static const char *formatExtension(const std::string &Format);
 
   ~TemplightTracer() override;
 

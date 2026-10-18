@@ -11,6 +11,7 @@
 
 #include "PrintableTemplightEntries.h"
 #include "TemplightEntryPrinter.h"
+#include "TemplightExtraWriters.h"
 #include "TemplightProtobufWriter.h"
 
 #include <clang/Basic/FileManager.h>
@@ -279,8 +280,57 @@ void TemplightTracer::atTemplateEnd(const Sema &TheSema,
   Printer->printRawEntry(Entry, SafeModeFlag);
 }
 
+namespace {
+struct TraceFormat {
+  const char *Name;
+  const char *Extension;
+};
+// The default first.
+const TraceFormat TraceFormats[] = {
+    {"protobuf", "pbf"}, {"yaml", "yaml"},       {"xml", "xml"},
+    {"text", "txt"},     {"nestedxml", "xml"},   {"graphml", "graphml"},
+    {"graphviz", "dot"}};
+} // namespace
+
+bool TemplightTracer::isFormat(const std::string &Format) {
+  for (const TraceFormat &F : TraceFormats)
+    if (Format == F.Name)
+      return true;
+  return false;
+}
+
+const char *TemplightTracer::formatList() {
+  return "protobuf, yaml, xml, text, nestedxml, graphml, graphviz";
+}
+
+const char *TemplightTracer::formatExtension(const std::string &Format) {
+  for (const TraceFormat &F : TraceFormats)
+    if (Format == F.Name)
+      return F.Extension;
+  return TraceFormats[0].Extension;
+}
+
+static TemplightWriter *createWriter(const std::string &Format,
+                                     llvm::raw_ostream &OS, bool Safemode) {
+  if (Format == "yaml")
+    return new TemplightYamlWriter(OS);
+  if (Format == "xml")
+    return new TemplightXmlWriter(OS);
+  if (Format == "text")
+    return new TemplightTextWriter(OS);
+  if (Format == "nestedxml")
+    return new TemplightNestedXMLWriter(OS);
+  if (Format == "graphml")
+    return new TemplightGraphMLWriter(OS);
+  if (Format == "graphviz")
+    return new TemplightGraphVizWriter(OS);
+  return new TemplightProtobufWriter(OS, /*aCompressLevel=*/2,
+                                     /*aStreaming=*/Safemode);
+}
+
 TemplightTracer::TemplightTracer(const Sema &TheSema, std::string Output,
-                                 bool Memory, bool Safemode, bool IgnoreSystem)
+                                 bool Memory, bool Safemode, bool IgnoreSystem,
+                                 const std::string &Format)
     : MemoryFlag(Memory), SafeModeFlag(Safemode) {
 
   Printer.reset(
@@ -299,9 +349,8 @@ TemplightTracer::TemplightTracer(const Sema &TheSema, std::string Output,
   if (Safemode)
     Printer->getTraceStream()->SetUnbuffered();
 
-  Printer->takeWriter(new clang::TemplightProtobufWriter(
-      *Printer->getTraceStream(), /*aCompressLevel=*/2,
-      /*aStreaming=*/Safemode));
+  Printer->takeWriter(
+      createWriter(Format, *Printer->getTraceStream(), Safemode));
 }
 
 TemplightTracer::~TemplightTracer() {

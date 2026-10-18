@@ -65,6 +65,7 @@ namespace clang { namespace driver { namespace options = clang::options; } }
 #include "llvm/TargetParser/Host.h"
 
 #include "TemplightAction.h"
+#include "TemplightTracer.h"
 
 #include <memory>
 #include <set>
@@ -127,9 +128,17 @@ static cl::opt<std::string> BlackListFilename(
         "Use regex expressions in <file> to filter out undesirable traces."),
     cl::cat(ClangTemplightCategory));
 
+static cl::opt<std::string>
+    OutputFormat("format",
+                 cl::desc("Write Templight traces in <format>: protobuf "
+                          "(default), yaml, xml, text, nestedxml, graphml "
+                          "or graphviz."),
+                 cl::init("protobuf"), cl::cat(ClangTemplightCategory));
+
 static cl::Option *TemplightOptions[] = {
     &OutputToStdOut, &MemoryProfile,    &OutputInSafeMode, &IgnoreSystemInst,
-    &InstProfiler,   &InteractiveDebug, &OutputFilename,   &BlackListFilename};
+    &InstProfiler,   &InteractiveDebug, &OutputFilename,   &BlackListFilename,
+    &OutputFormat};
 
 void PrintTemplightHelp() {
   // Compute the maximum argument length...
@@ -441,6 +450,15 @@ static int ExecuteTemplightInvocation(CompilerInstance *Clang) {
   if (Clang->getDiagnostics().hasErrorOccurred())
     return 1;
 
+  // Refuse an unknown trace format before anything, the trace file included,
+  // is written.
+  if (!TemplightTracer::isFormat(OutputFormat)) {
+    llvm::errs() << "error: [Templight] unknown trace format '" << OutputFormat
+                 << "'; accepted formats: " << TemplightTracer::formatList()
+                 << "\n";
+    return 1;
+  }
+
   // Create and execute the frontend action.
   std::unique_ptr<TemplightAction> Act(
       new TemplightAction(CreateFrontendAction(*Clang)));
@@ -455,9 +473,11 @@ static int ExecuteTemplightInvocation(CompilerInstance *Clang) {
   Act->IgnoreSystemInst = IgnoreSystemInst;
   Act->InteractiveDebug = InteractiveDebug;
   Act->BlackListFilename = BlackListFilename;
+  Act->OutputFormat = OutputFormat;
 
   Act->OutputFilename = TemplightAction::CreateOutputFilename(
-      Clang, LocalOutputFilename, InstProfiler, OutputToStdOut, MemoryProfile);
+      Clang, LocalOutputFilename, InstProfiler, OutputToStdOut, MemoryProfile,
+      OutputFormat);
 
   // Executing the templight action...
   bool Success = Clang->ExecuteAction(*Act);
@@ -515,7 +535,8 @@ static void ExecuteTemplightCommand(
     LocalOutputFilename =
         ""; // Let the filename be created from options or output file name.
     std::string TemplightOutFile = TemplightAction::CreateOutputFilename(
-        Clang.get(), "", InstProfiler, OutputToStdOut, MemoryProfile);
+        Clang.get(), "", InstProfiler, OutputToStdOut, MemoryProfile,
+        OutputFormat);
     // Check if templight filename is in a temporary path:
     if (Clang->getFrontendOpts().UseTemporary) {
       C.addTempFile(TemplightOutFile.c_str());
@@ -761,7 +782,8 @@ int main(int argc_, const char **argv_) {
       if (OutputFilename.empty())
         OutputFilename = "a";
       std::string FinalOutputFilename = TemplightAction::CreateOutputFilename(
-          nullptr, OutputFilename, InstProfiler, OutputToStdOut, MemoryProfile);
+          nullptr, OutputFilename, InstProfiler, OutputToStdOut, MemoryProfile,
+          OutputFormat);
       if ((!FinalOutputFilename.empty()) && (FinalOutputFilename != "-")) {
         std::error_code error;
         llvm::raw_fd_ostream TraceOS(FinalOutputFilename, error,

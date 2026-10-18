@@ -37,7 +37,8 @@ bool TemplightAction::BeginSourceFileAction(CompilerInstance &CI) {
 
 std::string TemplightAction::CreateOutputFilename(
     CompilerInstance *CI, const std::string &OptOutputName,
-    bool OptInstProfiler, bool OptOutputToStdOut, bool OptMemoryProfile) {
+    bool OptInstProfiler, bool OptOutputToStdOut, bool OptMemoryProfile,
+    const std::string &OptFormat) {
   std::string result;
 
   if (!OptInstProfiler) {
@@ -72,7 +73,7 @@ std::string TemplightAction::CreateOutputFilename(
 
   if (result.rfind(".trace.") == std::string::npos) {
     result += (OptMemoryProfile ? ".memory.trace." : ".trace.");
-    result += "pbf";
+    result += TemplightTracer::formatExtension(OptFormat);
   }
 
   return result;
@@ -109,7 +110,7 @@ void TemplightAction::ExecuteAction() {
 
     std::unique_ptr<TemplightTracer> p_t(
         new TemplightTracer(CI.getSema(), OutputFilename, MemoryProfile,
-                            OutputInSafeMode, IgnoreSystemInst));
+                            OutputInSafeMode, IgnoreSystemInst, OutputFormat));
     p_t->readBlacklists(BlackListFilename);
     CI.getSema().TemplateInstCallbacks.push_back(std::move(p_t));
   }

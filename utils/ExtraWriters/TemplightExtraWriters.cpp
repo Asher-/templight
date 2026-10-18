@@ -9,7 +9,7 @@
 
 #include "TemplightExtraWriters.h"
 
-#include <clang/Sema/ActiveTemplateInst.h>
+#include <clang/Sema/Sema.h>
 
 #include <llvm/Support/Format.h>
 #include <llvm/Support/YAMLTraits.h>
@@ -77,7 +77,7 @@ struct ScalarEnumerationTraits<
 
 #define def_enum_case(e) io.enumCase(value, SynthesisKindStrings[e], e)
 
-    using namespace clang;
+    using CodeSynthesisContext = clang::Sema::CodeSynthesisContext;
     def_enum_case(CodeSynthesisContext::TemplateInstantiation);
     def_enum_case(CodeSynthesisContext::DefaultTemplateArgumentInstantiation);
     def_enum_case(CodeSynthesisContext::DefaultFunctionArgumentInstantiation);
