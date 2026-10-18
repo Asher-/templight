@@ -35,8 +35,13 @@ public:
 
   void printEntry(const PrintableTemplightEntryBegin &aEntry) override;
   void printEntry(const PrintableTemplightEntryEnd &aEntry) override;
+  void printDeclRead(const PrintableTemplightEntryDeclRead &aEntry) override;
+  void
+  printMergedDecl(const PrintableTemplightEntryMergedDecl &aEntry) override;
 
 private:
+  // Writes one sequence element, as printEntry does.
+  template <typename EntryT> void printElement(EntryT &Entry);
   std::unique_ptr<llvm::yaml::Output> Output;
   bool HasEntries = false;
 };

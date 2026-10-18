@@ -20,6 +20,11 @@
 // RUN:   -fsyntax-only %s -Xtemplight -profiler -Xtemplight -deserialization \
 // RUN:   -Xtemplight -format=text -Xtemplight -output=%t/t.trace.txt
 // RUN: FileCheck %s --check-prefix=TEXT < %t/t.trace.txt
+// RUN: %templight_cc1 -std=c++17 -fmodules -fimplicit-module-maps \
+// RUN:   -fmodules-cache-path=%t/cache -I %S/Inputs/deserialization \
+// RUN:   -fsyntax-only %s -Xtemplight -profiler -Xtemplight -deserialization \
+// RUN:   -Xtemplight -format=yaml -Xtemplight -output=%t/t.trace.yaml
+// RUN: FileCheck %s --check-prefix=YAML < %t/t.trace.yaml
 
 #include "a.h"
 #include "b.h"
@@ -60,3 +65,17 @@ int Sum = deserA() + deserB();
 // TEXT-NEXT: Name = Chain<3>{{$}}
 // TEXT-NEXT: Module = DeserA
 // TEXT-NEXT: Module = DeserB
+
+// YAML: - DeclRead: {{ *}}ClassTemplateSpecialization
+// YAML-NEXT: Name: {{ *}}'Chain<3>'
+// YAML-NEXT: Module: {{ *}}DeserA
+// YAML-NEXT: StackDepthKB: {{ *}}{{[0-9]+}}
+// YAML: - DeclRead: {{ *}}ClassTemplateSpecialization
+// YAML-NEXT: Name: {{ *}}'Chain<3>'
+// YAML-NEXT: Module: {{ *}}DeserB
+// YAML: - MergedDecl: {{ *}}ClassTemplateSpecialization
+// YAML-NEXT: Name: {{ *}}'Chain<3>'
+// YAML-NEXT: Modules:
+// YAML-NEXT: - DeserA
+// YAML-NEXT: - DeserB
+// YAML: {{^}}...{{$}}

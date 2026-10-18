@@ -158,6 +158,23 @@ template <> struct MappingTraits<clang::PrintableTemplightEntryEnd> {
   }
 };
 
+template <> struct MappingTraits<clang::PrintableTemplightEntryDeclRead> {
+  static void mapping(IO &io, clang::PrintableTemplightEntryDeclRead &Entry) {
+    io.mapRequired("DeclRead", Entry.Kind);
+    io.mapRequired("Name", Entry.Name);
+    io.mapRequired("Module", Entry.ModuleName);
+    io.mapRequired("StackDepthKB", Entry.StackDepthKB);
+  }
+};
+
+template <> struct MappingTraits<clang::PrintableTemplightEntryMergedDecl> {
+  static void mapping(IO &io, clang::PrintableTemplightEntryMergedDecl &Entry) {
+    io.mapRequired("MergedDecl", Entry.Kind);
+    io.mapRequired("Name", Entry.Name);
+    io.mapRequired("Modules", Entry.ModuleNames);
+  }
+};
+
 } // namespace yaml
 } // namespace llvm
 namespace clang {
@@ -200,6 +217,30 @@ void TemplightYamlWriter::printEntry(const PrintableTemplightEntryEnd &Entry) {
     HasEntries = true;
     setCrashClosing("\n...\n");
   }
+}
+
+template <typename EntryT>
+void TemplightYamlWriter::printElement(EntryT &Entry) {
+  void *SaveInfo;
+  if (Output->preflightElement(1, SaveInfo)) {
+    llvm::yaml::EmptyContext Context;
+    llvm::yaml::yamlize(*Output, Entry, true, Context);
+    Output->postflightElement(SaveInfo);
+  }
+  if (!HasEntries) {
+    HasEntries = true;
+    setCrashClosing("\n...\n");
+  }
+}
+
+void TemplightYamlWriter::printDeclRead(
+    const PrintableTemplightEntryDeclRead &Entry) {
+  printElement(const_cast<PrintableTemplightEntryDeclRead &>(Entry));
+}
+
+void TemplightYamlWriter::printMergedDecl(
+    const PrintableTemplightEntryMergedDecl &Entry) {
+  printElement(const_cast<PrintableTemplightEntryMergedDecl &>(Entry));
 }
 
 TemplightYamlWriter::TemplightYamlWriter(llvm::raw_ostream &aOS)
