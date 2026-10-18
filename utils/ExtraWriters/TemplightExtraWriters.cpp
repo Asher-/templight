@@ -490,7 +490,39 @@ void TemplightNestedXMLWriter::initializeTree(const std::string &aSourceName) {
   OutputOS << "<Trace>\n";
 }
 
-void TemplightNestedXMLWriter::finalizeTree() { OutputOS << "</Trace>\n"; }
+void TemplightNestedXMLWriter::finalizeTree() {
+  OutputOS << PendingDecls << "</Trace>\n";
+}
+
+void TemplightNestedXMLWriter::printDeclRead(
+    const PrintableTemplightEntryDeclRead &aEntry) {
+  std::string Element;
+  llvm::raw_string_ostream OS(Element);
+  OS << llvm::format("<DeclRead Kind=\"%s\" Name=\"%s\" Module=\"%s\" "
+                     "StackDepthKB=\"%llu\"/>\n",
+                     aEntry.Kind.c_str(), escapeXml(aEntry.Name).c_str(),
+                     escapeXml(aEntry.ModuleName).c_str(),
+                     (unsigned long long)aEntry.StackDepthKB);
+  if (Streaming)
+    OutputOS << Element;
+  else
+    PendingDecls += Element;
+}
+
+void TemplightNestedXMLWriter::printMergedDecl(
+    const PrintableTemplightEntryMergedDecl &aEntry) {
+  std::string Element;
+  llvm::raw_string_ostream OS(Element);
+  OS << llvm::format("<MergedDecl Kind=\"%s\" Name=\"%s\">\n",
+                     aEntry.Kind.c_str(), escapeXml(aEntry.Name).c_str());
+  for (const std::string &ModuleName : aEntry.ModuleNames)
+    OS << "<Module Name=\"" << escapeXml(ModuleName) << "\"/>\n";
+  OS << "</MergedDecl>\n";
+  if (Streaming)
+    OutputOS << Element;
+  else
+    PendingDecls += Element;
+}
 
 // The opening of an <Entry> tag up to the measurements, which only the end of
 // the instantiation provides.

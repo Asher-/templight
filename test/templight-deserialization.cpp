@@ -25,6 +25,22 @@
 // RUN:   -fsyntax-only %s -Xtemplight -profiler -Xtemplight -deserialization \
 // RUN:   -Xtemplight -format=yaml -Xtemplight -output=%t/t.trace.yaml
 // RUN: FileCheck %s --check-prefix=YAML < %t/t.trace.yaml
+// RUN: %templight_cc1 -std=c++17 -fmodules -fimplicit-module-maps \
+// RUN:   -fmodules-cache-path=%t/cache -I %S/Inputs/deserialization \
+// RUN:   -fsyntax-only %s -Xtemplight -profiler -Xtemplight -deserialization \
+// RUN:   -Xtemplight -format=nestedxml \
+// RUN:   -Xtemplight -output=%t/t.trace.nested.xml
+// RUN: %python %S/Inputs/read-xml-trace.py < %t/t.trace.nested.xml \
+// RUN:   | FileCheck %s --check-prefix=XML-PARSE
+// RUN: FileCheck %s --check-prefix=NESTEDXML < %t/t.trace.nested.xml
+// RUN: %templight_cc1 -std=c++17 -fmodules -fimplicit-module-maps \
+// RUN:   -fmodules-cache-path=%t/cache -I %S/Inputs/deserialization \
+// RUN:   -fsyntax-only %s -Xtemplight -profiler -Xtemplight -deserialization \
+// RUN:   -Xtemplight -safe-mode -Xtemplight -format=nestedxml \
+// RUN:   -Xtemplight -output=%t/t.trace.nested.safe.xml
+// RUN: %python %S/Inputs/read-xml-trace.py < %t/t.trace.nested.safe.xml \
+// RUN:   | FileCheck %s --check-prefix=XML-PARSE
+// RUN: FileCheck %s --check-prefix=NESTEDXML < %t/t.trace.nested.safe.xml
 
 #include "a.h"
 #include "b.h"
@@ -79,3 +95,11 @@ int Sum = deserA() + deserB();
 // YAML-NEXT: - DeserA
 // YAML-NEXT: - DeserB
 // YAML: {{^}}...{{$}}
+
+// NESTEDXML: Name="Chain&lt;3&gt;" Module="DeserA" StackDepthKB="{{[0-9]+}}"/>
+// NESTEDXML: Name="Chain&lt;3&gt;" Module="DeserB" StackDepthKB="{{[0-9]+}}"/>
+// NESTEDXML: <MergedDecl Kind="ClassTemplateSpecialization" Name="Chain&lt;3&gt;">
+// NESTEDXML-NEXT: <Module Name="DeserA"/>
+// NESTEDXML-NEXT: <Module Name="DeserB"/>
+// NESTEDXML-NEXT: </MergedDecl>
+// NESTEDXML: </Trace>

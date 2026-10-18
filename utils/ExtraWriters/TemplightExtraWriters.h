@@ -126,6 +126,10 @@ public:
   TemplightNestedXMLWriter(llvm::raw_ostream &aOS, bool aStreaming = false);
   ~TemplightNestedXMLWriter();
 
+  void printDeclRead(const PrintableTemplightEntryDeclRead &aEntry) override;
+  void
+  printMergedDecl(const PrintableTemplightEntryMergedDecl &aEntry) override;
+
 protected:
   void openPrintedTreeNode(const EntryTraversalTask &aNode) override;
   void closePrintedTreeNode(const EntryTraversalTask &aNode) override;
@@ -137,6 +141,10 @@ protected:
   void streamEnd(const EntryTraversalTask &aNode) override;
   std::string crashClosingOf(const EntryTraversalTask &aNode) override;
   std::string crashClosingOfTrace() override;
+
+private:
+  // -deserialization elements held until finalizeTree() when not streaming.
+  std::string PendingDecls;
 };
 
 class TemplightGraphMLWriter : public TemplightTreeWriter {
