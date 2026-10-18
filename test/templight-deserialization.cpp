@@ -44,6 +44,21 @@
 // RUN: %templight_cc1 -std=c++17 -fmodules -fimplicit-module-maps \
 // RUN:   -fmodules-cache-path=%t/cache -I %S/Inputs/deserialization \
 // RUN:   -fsyntax-only %s -Xtemplight -profiler -Xtemplight -deserialization \
+// RUN:   -Xtemplight -format=graphml -Xtemplight -output=%t/t.trace.graphml
+// RUN: %python %S/Inputs/read-xml-trace.py < %t/t.trace.graphml \
+// RUN:   | FileCheck %s --check-prefix=GRAPHML-PARSE
+// RUN: FileCheck %s --check-prefix=GRAPHML < %t/t.trace.graphml
+// RUN: %templight_cc1 -std=c++17 -fmodules -fimplicit-module-maps \
+// RUN:   -fmodules-cache-path=%t/cache -I %S/Inputs/deserialization \
+// RUN:   -fsyntax-only %s -Xtemplight -profiler -Xtemplight -deserialization \
+// RUN:   -Xtemplight -safe-mode -Xtemplight -format=graphml \
+// RUN:   -Xtemplight -output=%t/t.trace.safe.graphml
+// RUN: %python %S/Inputs/read-xml-trace.py < %t/t.trace.safe.graphml \
+// RUN:   | FileCheck %s --check-prefix=GRAPHML-PARSE
+// RUN: FileCheck %s --check-prefix=GRAPHML < %t/t.trace.safe.graphml
+// RUN: %templight_cc1 -std=c++17 -fmodules -fimplicit-module-maps \
+// RUN:   -fmodules-cache-path=%t/cache -I %S/Inputs/deserialization \
+// RUN:   -fsyntax-only %s -Xtemplight -profiler -Xtemplight -deserialization \
 // RUN:   -Xtemplight -format=graphviz -Xtemplight -output=%t/t.trace.dot
 // RUN: FileCheck %s --check-prefix=GRAPHVIZ < %t/t.trace.dot
 
@@ -108,6 +123,28 @@ int Sum = deserA() + deserB();
 // NESTEDXML-NEXT: <Module Name="DeserB"/>
 // NESTEDXML-NEXT: </MergedDecl>
 // NESTEDXML: </Trace>
+
+// GRAPHML-PARSE: root=graphml
+// GRAPHML-PARSE: node {{r[0-9]+}} "Chain<3>"
+// GRAPHML-PARSE: node {{r[0-9]+}} "Chain<3>"
+// GRAPHML-PARSE: node {{m[0-9]+}} "Chain<3>"
+
+// GRAPHML: <key id="d8" for="node" attr.name="Module" attr.type="string"/>
+// GRAPHML-NEXT: <key id="d9" for="node" attr.name="StackDepthKB" attr.type="long"/>
+// GRAPHML: <data key="d0">ClassTemplateSpecialization</data>
+// GRAPHML-NEXT: <data key="d1">"Chain&lt;3&gt;"</data>
+// GRAPHML-NEXT: <data key="d8">DeserA</data>
+// GRAPHML-NEXT: <data key="d9">{{[0-9]+}}</data>
+// GRAPHML: <data key="d0">ClassTemplateSpecialization</data>
+// GRAPHML-NEXT: <data key="d1">"Chain&lt;3&gt;"</data>
+// GRAPHML-NEXT: <data key="d8">DeserB</data>
+// GRAPHML-NEXT: <data key="d9">{{[0-9]+}}</data>
+// GRAPHML: <data key="d0">ClassTemplateSpecialization</data>
+// GRAPHML-NEXT: <data key="d1">"Chain&lt;3&gt;"</data>
+// GRAPHML-NEXT: <data key="d8">DeserA,DeserB</data>
+// GRAPHML-NEXT: </node>
+// GRAPHML: </graph>
+// GRAPHML-NEXT: </graphml>
 
 // GRAPHVIZ: digraph Trace {
 // GRAPHVIZ: label = "DeclRead\nClassTemplateSpecialization\nChain&lt;3&gt;\nModule: DeserA\nStack: {{[0-9]+}} KB" ];

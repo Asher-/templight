@@ -152,6 +152,10 @@ public:
   TemplightGraphMLWriter(llvm::raw_ostream &aOS, bool aStreaming = false);
   ~TemplightGraphMLWriter();
 
+  void printDeclRead(const PrintableTemplightEntryDeclRead &aEntry) override;
+  void
+  printMergedDecl(const PrintableTemplightEntryMergedDecl &aEntry) override;
+
 protected:
   void openPrintedTreeNode(const EntryTraversalTask &aNode) override;
   void closePrintedTreeNode(const EntryTraversalTask &aNode) override;
@@ -165,6 +169,9 @@ protected:
   std::string crashClosingOfTrace() override;
 
 private:
+  // -deserialization nodes held until finalizeTree() when not streaming.
+  std::string PendingDecls;
+  std::size_t DeclNodes = 0;
   void printNodeData(const PrintableTemplightEntryBegin &BegEntry);
 
   int last_edge_id;

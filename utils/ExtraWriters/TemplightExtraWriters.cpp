@@ -607,7 +607,11 @@ TemplightGraphMLWriter::TemplightGraphMLWriter(llvm::raw_ostream &aOS,
               "<default>0</default>\n"
               "</key>\n"
               "<key id=\"d5\" for=\"node\" attr.name=\"TemplateOrigin\" "
-              "attr.type=\"string\"/>\n";
+              "attr.type=\"string\"/>\n"
+              "<key id=\"d8\" for=\"node\" attr.name=\"Module\" "
+              "attr.type=\"string\"/>\n"
+              "<key id=\"d9\" for=\"node\" attr.name=\"StackDepthKB\" "
+              "attr.type=\"long\"/>\n";
   // Streaming writes a node when its instantiation begins, before its time
   // and memory are known; they go on the edge from its parent, written when
   // the instantiation ends.
@@ -640,7 +644,49 @@ void TemplightGraphMLWriter::initializeTree(const std::string &aSourceName) {
   }
 }
 
-void TemplightGraphMLWriter::finalizeTree() { OutputOS << "</graph>\n"; }
+void TemplightGraphMLWriter::finalizeTree() {
+  OutputOS << PendingDecls << "</graph>\n";
+}
+
+void TemplightGraphMLWriter::printDeclRead(
+    const PrintableTemplightEntryDeclRead &aEntry) {
+  std::string Node;
+  llvm::raw_string_ostream OS(Node);
+  OS << llvm::format("<node id=\"r%zu\">\n"
+                     "  <data key=\"d0\">%s</data>\n"
+                     "  <data key=\"d1\">\"%s\"</data>\n"
+                     "  <data key=\"d8\">%s</data>\n"
+                     "  <data key=\"d9\">%llu</data>\n"
+                     "</node>\n",
+                     DeclNodes++, aEntry.Kind.c_str(),
+                     escapeXml(aEntry.Name).c_str(),
+                     escapeXml(aEntry.ModuleName).c_str(),
+                     (unsigned long long)aEntry.StackDepthKB);
+  if (Streaming)
+    OutputOS << Node;
+  else
+    PendingDecls += Node;
+}
+
+void TemplightGraphMLWriter::printMergedDecl(
+    const PrintableTemplightEntryMergedDecl &aEntry) {
+  std::string Modules;
+  for (const std::string &ModuleName : aEntry.ModuleNames)
+    Modules += (Modules.empty() ? "" : ",") + escapeXml(ModuleName);
+  std::string Node;
+  llvm::raw_string_ostream OS(Node);
+  OS << llvm::format("<node id=\"m%zu\">\n"
+                     "  <data key=\"d0\">%s</data>\n"
+                     "  <data key=\"d1\">\"%s\"</data>\n"
+                     "  <data key=\"d8\">%s</data>\n"
+                     "</node>\n",
+                     DeclNodes++, aEntry.Kind.c_str(),
+                     escapeXml(aEntry.Name).c_str(), Modules.c_str());
+  if (Streaming)
+    OutputOS << Node;
+  else
+    PendingDecls += Node;
+}
 
 void TemplightGraphMLWriter::openPrintedTreeNode(
     const EntryTraversalTask &aNode) {
