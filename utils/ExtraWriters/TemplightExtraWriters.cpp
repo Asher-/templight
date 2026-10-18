@@ -15,6 +15,8 @@
 #include <llvm/Support/YAMLTraits.h>
 #include <llvm/Support/raw_ostream.h>
 
+#include <atomic>
+
 namespace clang {
 
 // The names of Sema::CodeSynthesisContext::SynthesisKind, in enum order.
@@ -383,8 +385,10 @@ struct EntryTraversalTask {
   PrintableTemplightEntryBegin start;
   PrintableTemplightEntryEnd finish;
   std::size_t nd_id, id_end, parent_id;
-  // Streaming: what a crash writes to close this entry while it is open.
+  // Streaming: what a crash writes to close this entry while it is open, once
+  // its opening is fully written (closing_armed).
   std::string crash_closing;
+  bool closing_armed = false;
   EntryTraversalTask(const PrintableTemplightEntryBegin &aStart,
                      std::size_t aNdId, std::size_t aParentId)
       : start(aStart), finish(), nd_id(aNdId), id_end(invalid_id),
@@ -428,8 +432,11 @@ void TemplightTreeWriter::printEntry(
   p_tree->beginEntry(aEntry);
   if (Streaming) {
     EntryTraversalTask &Begun = p_tree->parent_stack[p_tree->cur_top];
-    streamBegin(Begun);
     Begun.crash_closing = crashClosingOf(Begun);
+    streamBegin(Begun);
+    // A crash handler on this thread sees the opening written before the arm.
+    std::atomic_signal_fence(std::memory_order_seq_cst);
+    Begun.closing_armed = true;
   }
 }
 
@@ -472,8 +479,9 @@ void TemplightTreeWriter::writeCrashClosing() {
   // Innermost open entry first. Only prepared strings are written here.
   for (std::size_t I = p_tree->cur_top; I != RecordedDFSEntryTree::invalid_id;
        I = p_tree->parent_stack[I].parent_id) {
-    const std::string &Closing = p_tree->parent_stack[I].crash_closing;
-    OutputOS.write(Closing.data(), Closing.size());
+    const EntryTraversalTask &Open = p_tree->parent_stack[I];
+    if (Open.closing_armed)
+      OutputOS.write(Open.crash_closing.data(), Open.crash_closing.size());
   }
   OutputOS.write(TraceClosing.data(), TraceClosing.size());
 }
