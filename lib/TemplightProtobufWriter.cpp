@@ -430,3 +430,72 @@ void TemplightProtobufWriter::printEntry(
 }
 
 } // namespace clang
+
+namespace clang {
+
+void TemplightProtobufWriter::appendEntry(unsigned OneofField,
+                                          const std::string &Contents) {
+  std::string oneof_contents;
+  {
+    llvm::raw_string_ostream OS_inner(oneof_contents);
+    llvm::protobuf::saveString(OS_inner, OneofField, Contents);
+  }
+
+  std::string entry_field;
+  {
+    llvm::raw_string_ostream OS(entry_field);
+
+    // repeated TemplightEntry entries = 2;
+    llvm::protobuf::saveString(OS, 2, oneof_contents);
+  }
+  appendToTrace(entry_field);
+}
+
+void TemplightProtobufWriter::printDeclRead(
+    const PrintableTemplightEntryDeclRead &aEntry) {
+
+  std::string entry_contents;
+  {
+    llvm::raw_string_ostream OS_inner(entry_contents);
+
+    /*
+  message DeclRead {
+    required string kind = 1;
+    required TemplateName name = 2;
+    required string module_name = 3;
+    required uint64 stack_depth_kb = 4;
+  }
+    */
+
+    llvm::protobuf::saveString(OS_inner, 1, aEntry.Kind);
+    llvm::protobuf::saveString(OS_inner, 2, printTemplateName(aEntry.Name));
+    llvm::protobuf::saveString(OS_inner, 3, aEntry.ModuleName);
+    llvm::protobuf::saveVarInt(OS_inner, 4, aEntry.StackDepthKB);
+  }
+  appendEntry(3, entry_contents); // decl_read
+}
+
+void TemplightProtobufWriter::printMergedDecl(
+    const PrintableTemplightEntryMergedDecl &aEntry) {
+
+  std::string entry_contents;
+  {
+    llvm::raw_string_ostream OS_inner(entry_contents);
+
+    /*
+  message MergedDecl {
+    required string kind = 1;
+    required TemplateName name = 2;
+    repeated string module_names = 3;
+  }
+    */
+
+    llvm::protobuf::saveString(OS_inner, 1, aEntry.Kind);
+    llvm::protobuf::saveString(OS_inner, 2, printTemplateName(aEntry.Name));
+    for (const std::string &ModuleName : aEntry.ModuleNames)
+      llvm::protobuf::saveString(OS_inner, 3, ModuleName);
+  }
+  appendEntry(4, entry_contents); // merged_decl
+}
+
+} // namespace clang

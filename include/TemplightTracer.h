@@ -12,8 +12,13 @@
 
 #include "clang/Sema/TemplateInstCallback.h"
 
+#include "llvm/ADT/StringMap.h"
+
+#include <cstdint>
 #include <memory>
 #include <string>
+#include <utility>
+#include <vector>
 
 namespace clang {
 
@@ -33,6 +38,13 @@ private:
   unsigned SafeModeFlag : 1;
 
   std::unique_ptr<TracePrinter> Printer;
+
+  // -deserialization: each declaration read, with an index into
+  // ReadModuleNames, kept for the merged-declaration entries of finalize().
+  std::vector<std::pair<const Decl *, unsigned>> DeclReads;
+  std::vector<std::string> ReadModuleNames;
+  llvm::StringMap<unsigned> ReadModuleIndex;
+  bool Finalized = false;
 
 public:
   /// \brief Writes the template trace to Output in Format, one of the names
@@ -56,6 +68,14 @@ public:
   bool getSafeModeFlag() const { return SafeModeFlag; };
 
   void readBlacklists(const std::string &BLFilename);
+
+  /// -deserialization: the ASTReader read \p D from a module file of module
+  /// \p ModuleName, \p StackDepthKB below the frame that connected it.
+  void declRead(const Decl *D, llvm::StringRef ModuleName,
+                std::uint64_t StackDepthKB);
+
+private:
+  void printMergedDecls();
 };
 
 } // namespace clang

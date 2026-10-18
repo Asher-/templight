@@ -18,6 +18,8 @@
 
 namespace clang {
 
+class TemplightDeserializationListener;
+
 class TemplightAction : public WrapperFrontendAction {
 protected:
   std::unique_ptr<clang::ASTConsumer>
@@ -31,6 +33,7 @@ public:
   /// Construct a TemplightAction from an existing action, taking
   /// ownership of it.
   TemplightAction(std::unique_ptr<FrontendAction> WrappedAction);
+  ~TemplightAction() override;
 
   bool usesPreprocessorOnly() const override;
   TranslationUnitKind getTranslationUnitKind() override;
@@ -53,12 +56,17 @@ public:
   unsigned OutputInSafeMode : 1;
   unsigned IgnoreSystemInst : 1;
   unsigned InteractiveDebug : 1;
+  unsigned TraceDeserialization : 1;
   std::string OutputFilename;
   std::string BlackListFilename;
   std::string OutputFormat = "protobuf";
 
 private:
   void EnsureHasSema(CompilerInstance &CI);
+
+  // -deserialization: reports the ASTReader's declaration reads to the
+  // tracer that ExecuteAction() creates.
+  std::unique_ptr<TemplightDeserializationListener> DeserializationListener;
 };
 
 } // namespace clang

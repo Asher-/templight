@@ -18,6 +18,10 @@
 #include <clang/Basic/SourceManager.h>
 #include <clang/Sema/Sema.h>
 
+#include <llvm/ADT/MapVector.h>
+#include <llvm/ADT/STLExtras.h>
+#include <llvm/ADT/SmallVector.h>
+
 #include <llvm/Support/Format.h>
 #include <llvm/Support/Process.h>
 #include <llvm/Support/Signals.h>
@@ -395,6 +399,7 @@ void TemplightTracer::initialize(const Sema &) {
 
 void TemplightTracer::finalize(const Sema &) {
   if (Printer) {
+    printMergedDecls();
     // finalize() closes the trace itself; a later crash adds nothing.
     releaseCrashWriter(Printer->getWriter());
     Printer->endTrace();
@@ -404,6 +409,64 @@ void TemplightTracer::finalize(const Sema &) {
 void TemplightTracer::readBlacklists(const std::string &BLFilename) {
   if (Printer)
     Printer->readBlacklists(BLFilename);
+}
+
+} // namespace clang
+
+namespace clang {
+
+namespace {
+// The kind and qualified name of D, with its template arguments.
+PrintableTemplightEntryDeclRead describeDecl(const Decl *D) {
+  PrintableTemplightEntryDeclRead Entry;
+  Entry.Kind = D->getDeclKindName();
+  if (const auto *ND = dyn_cast<NamedDecl>(D)) {
+    llvm::raw_string_ostream OS(Entry.Name);
+    ND->getNameForDiagnostic(OS, D->getASTContext().getPrintingPolicy(),
+                             /*Qualified=*/true);
+  }
+  Entry.StackDepthKB = 0;
+  return Entry;
+}
+} // namespace
+
+void TemplightTracer::declRead(const Decl *D, llvm::StringRef ModuleName,
+                               std::uint64_t StackDepthKB) {
+  if (!Printer || Finalized)
+    return;
+  auto Inserted =
+      ReadModuleIndex.try_emplace(ModuleName, ReadModuleNames.size());
+  if (Inserted.second)
+    ReadModuleNames.push_back(ModuleName.str());
+  DeclReads.emplace_back(D, Inserted.first->second);
+
+  PrintableTemplightEntryDeclRead Entry = describeDecl(D);
+  Entry.ModuleName = ModuleName.str();
+  Entry.StackDepthKB = StackDepthKB;
+  Printer->getWriter()->printDeclRead(Entry);
+}
+
+void TemplightTracer::printMergedDecls() {
+  // Reads that finish while the groups are formed or named come after the
+  // end of the translation unit and are not recorded.
+  Finalized = true;
+  llvm::MapVector<const Decl *, llvm::SmallVector<unsigned, 2>> Groups;
+  for (const auto &[D, Module] : DeclReads) {
+    llvm::SmallVector<unsigned, 2> &Modules = Groups[D->getCanonicalDecl()];
+    if (!llvm::is_contained(Modules, Module))
+      Modules.push_back(Module);
+  }
+  for (const auto &[Canonical, Modules] : Groups) {
+    if (Modules.size() < 2)
+      continue;
+    PrintableTemplightEntryDeclRead Described = describeDecl(Canonical);
+    PrintableTemplightEntryMergedDecl Entry;
+    Entry.Kind = std::move(Described.Kind);
+    Entry.Name = std::move(Described.Name);
+    for (unsigned Module : Modules)
+      Entry.ModuleNames.push_back(ReadModuleNames[Module]);
+    Printer->getWriter()->printMergedDecl(Entry);
+  }
 }
 
 } // namespace clang

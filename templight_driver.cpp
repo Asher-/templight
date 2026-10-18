@@ -97,6 +97,14 @@ static cl::opt<bool> MemoryProfile(
     cl::desc("Profile the memory usage during template instantiations."),
     cl::cat(ClangTemplightCategory));
 
+static cl::opt<bool> TraceDeserialization(
+    "deserialization",
+    cl::desc("Trace each declaration read from a module file, with its \n"
+             "module and the stack depth at the read, and at the end of \n"
+             "the translation unit each declaration read from several \n"
+             "module files."),
+    cl::cat(ClangTemplightCategory));
+
 static cl::opt<bool> OutputInSafeMode(
     "safe-mode",
     cl::desc("Output Templight traces without buffering, \n"
@@ -141,9 +149,10 @@ static cl::opt<std::string>
                  cl::init("protobuf"), cl::cat(ClangTemplightCategory));
 
 static cl::Option *TemplightOptions[] = {
-    &OutputToStdOut, &MemoryProfile,    &OutputInSafeMode, &IgnoreSystemInst,
-    &InstProfiler,   &InteractiveDebug, &OutputFilename,   &BlackListFilename,
-    &OutputFormat};
+    &OutputToStdOut,      &MemoryProfile,     &OutputInSafeMode,
+    &IgnoreSystemInst,    &InstProfiler,      &InteractiveDebug,
+    &OutputFilename,      &BlackListFilename, &OutputFormat,
+    &TraceDeserialization};
 
 void PrintTemplightHelp() {
   // Compute the maximum argument length...
@@ -479,6 +488,7 @@ static int ExecuteTemplightInvocation(CompilerInstance *Clang) {
   Act->InteractiveDebug = InteractiveDebug;
   Act->BlackListFilename = BlackListFilename;
   Act->OutputFormat = OutputFormat;
+  Act->TraceDeserialization = TraceDeserialization;
 
   Act->OutputFilename = TemplightAction::CreateOutputFilename(
       Clang, LocalOutputFilename, InstProfiler, OutputToStdOut, MemoryProfile,

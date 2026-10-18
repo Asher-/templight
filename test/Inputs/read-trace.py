@@ -95,6 +95,15 @@ def main():
                                   location(parts.get(3, b""), files)))
                         elif kind == 2:
                             print("end")
+                        elif kind == 3:
+                            print("decl-read kind=%s name=%s module=%s stack-kb=%d" % (
+                                  parts.get(1, b"").decode(), template_name(dictionary, parts.get(2, b"")),
+                                  parts.get(3, b"").decode(), parts.get(4, 0)))
+                        elif kind == 4:
+                            modules = [v.decode() for n, v in fields(body) if n == 3]
+                            print("merged-decl kind=%s name=%s modules=%s" % (
+                                  parts.get(1, b"").decode(), template_name(dictionary, parts.get(2, b"")),
+                                  ",".join(modules)))
     except EOFError:
         print("truncated")
     print("entries-done")

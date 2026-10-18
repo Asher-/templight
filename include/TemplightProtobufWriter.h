@@ -43,6 +43,8 @@ private:
   std::uint64_t BodySize = 0;
 
   void appendToTrace(llvm::StringRef Field);
+  // Appends a TemplightEntry whose field 'OneofField' holds 'Contents'.
+  void appendEntry(unsigned OneofField, const std::string &Contents);
   void patchLength();
 
   std::size_t createDictionaryEntry(const std::string &Name);
@@ -59,6 +61,9 @@ public:
 
   void printEntry(const PrintableTemplightEntryBegin &aEntry) override;
   void printEntry(const PrintableTemplightEntryEnd &aEntry) override;
+  void printDeclRead(const PrintableTemplightEntryDeclRead &aEntry) override;
+  void
+  printMergedDecl(const PrintableTemplightEntryMergedDecl &aEntry) override;
 };
 
 } // namespace clang
