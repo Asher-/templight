@@ -734,7 +734,42 @@ void TemplightGraphVizWriter::initializeTree(const std::string &aSourceName) {
   OutputOS << "digraph Trace {\n";
 }
 
-void TemplightGraphVizWriter::finalizeTree() { OutputOS << "}\n"; }
+void TemplightGraphVizWriter::finalizeTree() {
+  OutputOS << PendingDecls << "}\n";
+}
+
+void TemplightGraphVizWriter::writeDeclNode(const std::string &Node) {
+  if (Streaming)
+    OutputOS << Node;
+  else
+    PendingDecls += Node;
+}
+
+void TemplightGraphVizWriter::printDeclRead(
+    const PrintableTemplightEntryDeclRead &aEntry) {
+  std::string Node;
+  llvm::raw_string_ostream OS(Node);
+  OS << llvm::format("d%zu [shape = note, label = \"DeclRead\\n%s\\n%s\\n"
+                     "Module: %s\\nStack: %llu KB\" ];\n",
+                     DeclNodes++, aEntry.Kind.c_str(),
+                     escapeXml(aEntry.Name).c_str(),
+                     escapeXml(aEntry.ModuleName).c_str(),
+                     (unsigned long long)aEntry.StackDepthKB);
+  writeDeclNode(Node);
+}
+
+void TemplightGraphVizWriter::printMergedDecl(
+    const PrintableTemplightEntryMergedDecl &aEntry) {
+  std::string Node;
+  llvm::raw_string_ostream OS(Node);
+  OS << llvm::format("d%zu [shape = note, label = \"MergedDecl\\n%s\\n%s",
+                     DeclNodes++, aEntry.Kind.c_str(),
+                     escapeXml(aEntry.Name).c_str());
+  for (const std::string &ModuleName : aEntry.ModuleNames)
+    OS << "\\nModule: " << escapeXml(ModuleName);
+  OS << "\" ];\n";
+  writeDeclNode(Node);
+}
 
 void TemplightGraphVizWriter::printNodeLabel(const EntryTraversalTask &aNode,
                                              bool WithMeasures) {

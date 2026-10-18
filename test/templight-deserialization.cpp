@@ -41,6 +41,11 @@
 // RUN: %python %S/Inputs/read-xml-trace.py < %t/t.trace.nested.safe.xml \
 // RUN:   | FileCheck %s --check-prefix=XML-PARSE
 // RUN: FileCheck %s --check-prefix=NESTEDXML < %t/t.trace.nested.safe.xml
+// RUN: %templight_cc1 -std=c++17 -fmodules -fimplicit-module-maps \
+// RUN:   -fmodules-cache-path=%t/cache -I %S/Inputs/deserialization \
+// RUN:   -fsyntax-only %s -Xtemplight -profiler -Xtemplight -deserialization \
+// RUN:   -Xtemplight -format=graphviz -Xtemplight -output=%t/t.trace.dot
+// RUN: FileCheck %s --check-prefix=GRAPHVIZ < %t/t.trace.dot
 
 #include "a.h"
 #include "b.h"
@@ -103,3 +108,9 @@ int Sum = deserA() + deserB();
 // NESTEDXML-NEXT: <Module Name="DeserB"/>
 // NESTEDXML-NEXT: </MergedDecl>
 // NESTEDXML: </Trace>
+
+// GRAPHVIZ: digraph Trace {
+// GRAPHVIZ: label = "DeclRead\nClassTemplateSpecialization\nChain&lt;3&gt;\nModule: DeserA\nStack: {{[0-9]+}} KB" ];
+// GRAPHVIZ: label = "DeclRead\nClassTemplateSpecialization\nChain&lt;3&gt;\nModule: DeserB\nStack: {{[0-9]+}} KB" ];
+// GRAPHVIZ: label = "MergedDecl\nClassTemplateSpecialization\nChain&lt;3&gt;\nModule: DeserA\nModule: DeserB" ];
+// GRAPHVIZ: {{^}}}{{$}}
