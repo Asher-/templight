@@ -8,6 +8,18 @@
 // RUN:   -fsyntax-only %s -Xtemplight -profiler -Xtemplight -deserialization \
 // RUN:   -Xtemplight -output=%t/t.trace.pbf
 // RUN: %python %S/Inputs/read-trace.py < %t/t.trace.pbf | FileCheck %s
+// RUN: %templight_cc1 -std=c++17 -fmodules -fimplicit-module-maps \
+// RUN:   -fmodules-cache-path=%t/cache -I %S/Inputs/deserialization \
+// RUN:   -fsyntax-only %s -Xtemplight -profiler -Xtemplight -deserialization \
+// RUN:   -Xtemplight -format=xml -Xtemplight -output=%t/t.trace.xml
+// RUN: %python %S/Inputs/read-xml-trace.py < %t/t.trace.xml \
+// RUN:   | FileCheck %s --check-prefix=XML-PARSE
+// RUN: FileCheck %s --check-prefix=XML < %t/t.trace.xml
+// RUN: %templight_cc1 -std=c++17 -fmodules -fimplicit-module-maps \
+// RUN:   -fmodules-cache-path=%t/cache -I %S/Inputs/deserialization \
+// RUN:   -fsyntax-only %s -Xtemplight -profiler -Xtemplight -deserialization \
+// RUN:   -Xtemplight -format=text -Xtemplight -output=%t/t.trace.txt
+// RUN: FileCheck %s --check-prefix=TEXT < %t/t.trace.txt
 
 #include "a.h"
 #include "b.h"
@@ -19,3 +31,32 @@ int Sum = deserA() + deserB();
 // CHECK-DAG: decl-read kind=ClassTemplateSpecialization name=Chain<3> module=DeserB stack-kb={{[0-9]+}}
 // CHECK: merged-decl kind=ClassTemplateSpecialization name=Chain<3> modules=DeserA,DeserB
 // CHECK: entries-done
+
+// XML-PARSE: root=Trace
+
+// XML: <Kind>ClassTemplateSpecialization</Kind>
+// XML-NEXT: <Name>Chain&lt;3&gt;</Name>
+// XML-NEXT: <Module>DeserA</Module>
+// XML-NEXT: <StackDepth kb = "{{[0-9]+}}"/>
+// XML: <Kind>ClassTemplateSpecialization</Kind>
+// XML-NEXT: <Name>Chain&lt;3&gt;</Name>
+// XML-NEXT: <Module>DeserB</Module>
+// XML: <MergedDecl>
+// XML: <Kind>ClassTemplateSpecialization</Kind>
+// XML-NEXT: <Name>Chain&lt;3&gt;</Name>
+// XML-NEXT: <Module>DeserA</Module>
+// XML-NEXT: <Module>DeserB</Module>
+// XML-NEXT: </MergedDecl>
+// XML: </Trace>
+
+// TEXT: DeclRead
+// TEXT: Name = Chain<3>{{$}}
+// TEXT-NEXT: Module = DeserA
+// TEXT-NEXT: StackDepthKB = {{[0-9]+}}
+// TEXT: Name = Chain<3>{{$}}
+// TEXT-NEXT: Module = DeserB
+// TEXT: MergedDecl
+// TEXT: Kind = ClassTemplateSpecialization
+// TEXT-NEXT: Name = Chain<3>{{$}}
+// TEXT-NEXT: Module = DeserA
+// TEXT-NEXT: Module = DeserB

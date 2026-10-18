@@ -253,6 +253,30 @@ void TemplightXmlWriter::printEntry(const PrintableTemplightEntryEnd &aEntry) {
                            aEntry.TimeStamp, aEntry.MemoryUsage);
 }
 
+void TemplightXmlWriter::printDeclRead(
+    const PrintableTemplightEntryDeclRead &aEntry) {
+  OutputOS << llvm::format("<DeclRead>\n"
+                           "    <Kind>%s</Kind>\n"
+                           "    <Name>%s</Name>\n"
+                           "    <Module>%s</Module>\n"
+                           "    <StackDepth kb = \"%llu\"/>\n"
+                           "</DeclRead>\n",
+                           aEntry.Kind.c_str(), escapeXml(aEntry.Name).c_str(),
+                           escapeXml(aEntry.ModuleName).c_str(),
+                           (unsigned long long)aEntry.StackDepthKB);
+}
+
+void TemplightXmlWriter::printMergedDecl(
+    const PrintableTemplightEntryMergedDecl &aEntry) {
+  OutputOS << llvm::format("<MergedDecl>\n"
+                           "    <Kind>%s</Kind>\n"
+                           "    <Name>%s</Name>\n",
+                           aEntry.Kind.c_str(), escapeXml(aEntry.Name).c_str());
+  for (const std::string &ModuleName : aEntry.ModuleNames)
+    OutputOS << "    <Module>" << escapeXml(ModuleName) << "</Module>\n";
+  OutputOS << "</MergedDecl>\n";
+}
+
 TemplightTextWriter::TemplightTextWriter(llvm::raw_ostream &aOS)
     : TemplightWriter(aOS) {}
 
@@ -288,6 +312,28 @@ void TemplightTextWriter::printEntry(const PrintableTemplightEntryEnd &aEntry) {
                            "  TimeStamp = %.9f\n"
                            "  MemoryUsage = %d\n",
                            aEntry.TimeStamp, aEntry.MemoryUsage);
+}
+
+void TemplightTextWriter::printDeclRead(
+    const PrintableTemplightEntryDeclRead &aEntry) {
+  OutputOS << llvm::format("DeclRead\n"
+                           "  Kind = %s\n"
+                           "  Name = %s\n"
+                           "  Module = %s\n"
+                           "  StackDepthKB = %llu\n",
+                           aEntry.Kind.c_str(), aEntry.Name.c_str(),
+                           aEntry.ModuleName.c_str(),
+                           (unsigned long long)aEntry.StackDepthKB);
+}
+
+void TemplightTextWriter::printMergedDecl(
+    const PrintableTemplightEntryMergedDecl &aEntry) {
+  OutputOS << llvm::format("MergedDecl\n"
+                           "  Kind = %s\n"
+                           "  Name = %s\n",
+                           aEntry.Kind.c_str(), aEntry.Name.c_str());
+  for (const std::string &ModuleName : aEntry.ModuleNames)
+    OutputOS << "  Module = " << ModuleName << "\n";
 }
 
 struct EntryTraversalTask {

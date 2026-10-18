@@ -51,6 +51,9 @@ public:
 
   void printEntry(const PrintableTemplightEntryBegin &aEntry) override;
   void printEntry(const PrintableTemplightEntryEnd &aEntry) override;
+  void printDeclRead(const PrintableTemplightEntryDeclRead &aEntry) override;
+  void
+  printMergedDecl(const PrintableTemplightEntryMergedDecl &aEntry) override;
 };
 
 class TemplightTextWriter : public TemplightWriter {
@@ -63,6 +66,9 @@ public:
 
   void printEntry(const PrintableTemplightEntryBegin &aEntry) override;
   void printEntry(const PrintableTemplightEntryEnd &aEntry) override;
+  void printDeclRead(const PrintableTemplightEntryDeclRead &aEntry) override;
+  void
+  printMergedDecl(const PrintableTemplightEntryMergedDecl &aEntry) override;
 };
 
 struct RecordedDFSEntryTree;
