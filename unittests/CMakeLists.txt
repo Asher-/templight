@@ -11,6 +11,8 @@ set(LLVM_LINK_COMPONENTS
 
 add_templight_unittest(TemplightTests
   TemplightActionTest.cpp
+  TemplightProtobufReaderTest.cpp
+  ../utils/ProtobufReader/TemplightProtobufReader.cpp
   )
 
 target_link_libraries(TemplightTests

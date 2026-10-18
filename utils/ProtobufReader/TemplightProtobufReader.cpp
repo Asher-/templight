@@ -11,7 +11,9 @@
 
 #include "ThinProtobuf.h"
 
+#include <llvm/ADT/StringExtras.h>
 #include <llvm/Support/Compression.h>
+#include <llvm/Support/Error.h>
 
 #include <cstdint>
 #include <string>
@@ -129,13 +131,14 @@ void TemplightProtobufReader::loadTemplateName(llvm::StringRef aSubBuffer) {
       break;
     case llvm::protobuf::getStringWire<2>::value: {
       LastBeginEntry.Name = llvm::protobuf::loadString(aSubBuffer);
-      llvm::SmallVector<char, 32> UBuf;
-      if (llvm::zlib::uncompress(LastBeginEntry.Name, UBuf,
-                                 LastBeginEntry.Name.size() * 2) ==
-          llvm::zlib::StatusOK)
-        LastBeginEntry.Name.assign(UBuf.begin(), UBuf.end());
-      else
+      llvm::SmallVector<uint8_t, 32> UBuf;
+      if (llvm::Error E = llvm::compression::zlib::decompress(
+              llvm::arrayRefFromStringRef(LastBeginEntry.Name), UBuf,
+              LastBeginEntry.Name.size() * 2)) {
+        llvm::consumeError(std::move(E));
         LastBeginEntry.Name = "";
+      } else
+        LastBeginEntry.Name = llvm::toStringRef(UBuf).str();
       break;
     }
     case llvm::protobuf::getVarIntWire<3>::value: {
@@ -226,7 +229,6 @@ void TemplightProtobufReader::loadEndEntry(llvm::StringRef aSubBuffer) {
 TemplightProtobufReader::LastChunkType
 TemplightProtobufReader::startOnBuffer(llvm::StringRef aBuffer) {
   buffer = aBuffer;
-  fileNameMap.clear();
   unsigned int cur_wire = llvm::protobuf::loadVarInt(buffer);
   if (cur_wire != llvm::protobuf::getStringWire<1>::value) {
     buffer = llvm::StringRef();
@@ -252,6 +254,10 @@ TemplightProtobufReader::LastChunkType TemplightProtobufReader::next() {
   unsigned int cur_wire = llvm::protobuf::loadVarInt(buffer);
   switch (cur_wire) {
   case llvm::protobuf::getStringWire<1>::value: {
+    // A header starts a new trace. A trace record without one continues the
+    // previous trace (a -safe-mode trace written to a pipe), so the file names
+    // that trace defined stay known.
+    fileNameMap.clear();
     std::uint64_t cur_size = llvm::protobuf::loadVarInt(buffer);
     loadHeader(buffer.slice(0, cur_size));
     buffer = buffer.drop_front(cur_size);
