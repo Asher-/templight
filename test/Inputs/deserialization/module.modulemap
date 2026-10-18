@@ -1,0 +1,11 @@
+module DeserChain {
+  textual header "chain.h"
+}
+module DeserA {
+  header "a.h"
+  export *
+}
+module DeserB {
+  header "b.h"
+  export *
+}
