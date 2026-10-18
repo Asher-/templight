@@ -294,8 +294,14 @@ TemplightTracer::TemplightTracer(const Sema &TheSema, std::string Output,
     return;
   }
 
-  Printer->takeWriter(
-      new clang::TemplightProtobufWriter(*Printer->getTraceStream()));
+  // In safe-mode every entry goes to the file as it is recorded, so the
+  // stream must not hold any of it back in a buffer.
+  if (Safemode)
+    Printer->getTraceStream()->SetUnbuffered();
+
+  Printer->takeWriter(new clang::TemplightProtobufWriter(
+      *Printer->getTraceStream(), /*aCompressLevel=*/2,
+      /*aStreaming=*/Safemode));
 }
 
 TemplightTracer::~TemplightTracer() {

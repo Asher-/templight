@@ -22,9 +22,45 @@
 
 namespace clang {
 
+// Width of the varint holding the streamed trace record's length. Five bytes
+// hold lengths below 2^35, and keep every 7-bit group within the shifts that
+// llvm::protobuf::loadVarInt evaluates in int.
+static const unsigned StreamedLengthWidth = 5;
+
 TemplightProtobufWriter::TemplightProtobufWriter(llvm::raw_ostream &aOS,
-                                                 int aCompressLevel)
-    : TemplightWriter(aOS), compressionMode(aCompressLevel) {}
+                                                 int aCompressLevel,
+                                                 bool aStreaming)
+    : TemplightWriter(aOS), compressionMode(aCompressLevel),
+      Streaming(aStreaming) {}
+
+void TemplightProtobufWriter::appendToTrace(llvm::StringRef Field) {
+  if (!Streaming) {
+    buffer.append(Field.data(), Field.size());
+    return;
+  }
+  if (!Seekable) {
+    // repeated TemplightTrace traces = 1; one record per append, which
+    // TemplightProtobufReader reads on as the same trace.
+    llvm::protobuf::saveString(OutputOS, 1, Field);
+    OutputOS.flush();
+    return;
+  }
+  OutputOS << Field;
+  OutputOS.flush();
+  BodySize += Field.size();
+  patchLength();
+}
+
+void TemplightProtobufWriter::patchLength() {
+  if (BodySize >> (7 * StreamedLengthWidth))
+    return; // Too long for the field: the last written length stays valid.
+  char Length[StreamedLengthWidth];
+  for (unsigned I = 0; I < StreamedLengthWidth; ++I)
+    Length[I] = static_cast<char>(((BodySize >> (7 * I)) & 0x7F) |
+                                  (I + 1 < StreamedLengthWidth ? 0x80 : 0));
+  static_cast<llvm::raw_fd_ostream &>(OutputOS).pwrite(
+      Length, StreamedLengthWidth, LengthOffset);
+}
 
 void TemplightProtobufWriter::initialize(const std::string &aSourceName) {
 
@@ -44,13 +80,34 @@ void TemplightProtobufWriter::initialize(const std::string &aSourceName) {
       llvm::protobuf::saveString(OS_inner, 2, aSourceName); // source_file
   }
 
-  llvm::raw_string_ostream OS(buffer);
+  std::string hdr_field;
+  {
+    llvm::raw_string_ostream OS(hdr_field);
 
-  // required TemplightHeader header = 1;
-  llvm::protobuf::saveString(OS, 1, hdr_contents);
+    // required TemplightHeader header = 1;
+    llvm::protobuf::saveString(OS, 1, hdr_contents);
+  }
+
+  if (Streaming) {
+    Seekable = OutputOS.get_kind() == llvm::raw_ostream::OStreamKind::OK_FDStream &&
+               static_cast<llvm::raw_fd_ostream &>(OutputOS).supportsSeeking();
+    if (Seekable) {
+      // repeated TemplightTrace traces = 1; its length is patched in place.
+      llvm::protobuf::saveVarInt(OutputOS,
+                                 llvm::protobuf::getStringWire<1>::value);
+      LengthOffset = OutputOS.tell();
+      OutputOS << std::string(StreamedLengthWidth, '\0');
+      patchLength();
+    }
+  }
+  appendToTrace(hdr_field);
 }
 
 void TemplightProtobufWriter::finalize() {
+  if (Streaming) {
+    OutputOS.flush();
+    return;
+  }
   // repeated TemplightTrace traces = 1;
   llvm::protobuf::saveString(OutputOS, 1, buffer);
 }
@@ -218,9 +275,13 @@ TemplightProtobufWriter::createDictionaryEntry(const std::string &NameOrig) {
   std::size_t id = templateNameMap.size();
   templateNameMap[NameOrig] = id;
 
-  llvm::raw_string_ostream OS_outer(buffer);
-  // repeated DictionaryEntry names = 3;
-  llvm::protobuf::saveString(OS_outer, 3, dict_entry);
+  std::string dict_field;
+  {
+    llvm::raw_string_ostream OS_outer(dict_field);
+    // repeated DictionaryEntry names = 3;
+    llvm::protobuf::saveString(OS_outer, 3, dict_entry);
+  }
+  appendToTrace(dict_field);
 
   return id;
 }
@@ -314,10 +375,14 @@ void TemplightProtobufWriter::printEntry(
     llvm::protobuf::saveString(OS_inner, 1, entry_contents); // begin
   }
 
-  llvm::raw_string_ostream OS(buffer);
+  std::string entry_field;
+  {
+    llvm::raw_string_ostream OS(entry_field);
 
-  // repeated TemplightEntry entries = 2;
-  llvm::protobuf::saveString(OS, 2, oneof_contents);
+    // repeated TemplightEntry entries = 2;
+    llvm::protobuf::saveString(OS, 2, oneof_contents);
+  }
+  appendToTrace(entry_field);
 }
 
 void TemplightProtobufWriter::printEntry(
@@ -354,10 +419,14 @@ void TemplightProtobufWriter::printEntry(
     llvm::protobuf::saveString(OS_inner, 2, entry_contents); // end
   }
 
-  llvm::raw_string_ostream OS(buffer);
+  std::string entry_field;
+  {
+    llvm::raw_string_ostream OS(entry_field);
 
-  // repeated TemplightEntry entries = 2;
-  llvm::protobuf::saveString(OS, 2, oneof_contents);
+    // repeated TemplightEntry entries = 2;
+    llvm::protobuf::saveString(OS, 2, oneof_contents);
+  }
+  appendToTrace(entry_field);
 }
 
 } // namespace clang
