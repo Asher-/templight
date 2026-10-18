@@ -119,6 +119,24 @@ void TemplightEntryPrinter::takeWriter(TemplightWriter *aPWriter) {
   p_writer.reset(aPWriter);
 }
 
+TemplightWriter *TemplightEntryPrinter::getWriter() const {
+  return p_writer.get();
+}
+
+void TemplightWriter::writeCrashClosing() {
+  int Active = ActiveCrashClosing.load();
+  if (Active < 0)
+    return;
+  const std::string &Text = CrashClosing[Active];
+  OutputOS.write(Text.data(), Text.size());
+}
+
+void TemplightWriter::setCrashClosing(std::string Text) {
+  int Next = ActiveCrashClosing.load() == 0 ? 1 : 0;
+  CrashClosing[Next] = std::move(Text);
+  ActiveCrashClosing.store(Next);
+}
+
 void TemplightEntryPrinter::readBlacklists(const std::string &BLFilename) {
   if (BLFilename.empty()) {
     CoRegex.reset();

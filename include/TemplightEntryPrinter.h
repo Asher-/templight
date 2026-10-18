@@ -42,6 +42,7 @@ public:
 
   llvm::raw_ostream *getTraceStream() const;
   void takeWriter(TemplightWriter *aPWriter);
+  TemplightWriter *getWriter() const;
 
   void readBlacklists(const std::string &BLFilename);
 

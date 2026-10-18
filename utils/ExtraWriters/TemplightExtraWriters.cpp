@@ -162,8 +162,11 @@ template <> struct MappingTraits<clang::PrintableTemplightEntryEnd> {
 } // namespace llvm
 namespace clang {
 
+// What endSequence() and endDocuments() would write after the entries so far:
+// an empty sequence before the first entry, then only the document end.
 void TemplightYamlWriter::initialize(const std::string &aSourceName) {
   Output->beginSequence();
+  setCrashClosing("\n[]\n...\n");
 }
 
 void TemplightYamlWriter::finalize() { Output->endSequence(); }
@@ -178,6 +181,10 @@ void TemplightYamlWriter::printEntry(
                         Context);
     Output->postflightElement(SaveInfo);
   }
+  if (!HasEntries) {
+    HasEntries = true;
+    setCrashClosing("\n...\n");
+  }
 }
 
 void TemplightYamlWriter::printEntry(const PrintableTemplightEntryEnd &Entry) {
@@ -188,6 +195,10 @@ void TemplightYamlWriter::printEntry(const PrintableTemplightEntryEnd &Entry) {
                         const_cast<PrintableTemplightEntryEnd &>(Entry), true,
                         Context);
     Output->postflightElement(SaveInfo);
+  }
+  if (!HasEntries) {
+    HasEntries = true;
+    setCrashClosing("\n...\n");
   }
 }
 
@@ -208,6 +219,7 @@ TemplightXmlWriter::~TemplightXmlWriter() {}
 
 void TemplightXmlWriter::initialize(const std::string &aSourceName) {
   OutputOS << "<Trace>\n";
+  setCrashClosing("</Trace>\n");
 }
 
 void TemplightXmlWriter::finalize() { OutputOS << "</Trace>\n"; }
@@ -284,6 +296,8 @@ struct EntryTraversalTask {
   PrintableTemplightEntryBegin start;
   PrintableTemplightEntryEnd finish;
   std::size_t nd_id, id_end, parent_id;
+  // Streaming: what a crash writes to close this entry while it is open.
+  std::string crash_closing;
   EntryTraversalTask(const PrintableTemplightEntryBegin &aStart,
                      std::size_t aNdId, std::size_t aParentId)
       : start(aStart), finish(), nd_id(aNdId), id_end(invalid_id),
@@ -315,46 +329,71 @@ struct RecordedDFSEntryTree {
   };
 };
 
-TemplightTreeWriter::TemplightTreeWriter(llvm::raw_ostream &aOS)
-    : TemplightWriter(aOS), p_tree(new RecordedDFSEntryTree()) {}
+TemplightTreeWriter::TemplightTreeWriter(llvm::raw_ostream &aOS,
+                                         bool aStreaming)
+    : TemplightWriter(aOS), p_tree(new RecordedDFSEntryTree()),
+      Streaming(aStreaming) {}
 
 TemplightTreeWriter::~TemplightTreeWriter() {}
 
 void TemplightTreeWriter::printEntry(
     const PrintableTemplightEntryBegin &aEntry) {
   p_tree->beginEntry(aEntry);
+  if (Streaming) {
+    EntryTraversalTask &Begun = p_tree->parent_stack[p_tree->cur_top];
+    streamBegin(Begun);
+    Begun.crash_closing = crashClosingOf(Begun);
+  }
 }
 
 void TemplightTreeWriter::printEntry(const PrintableTemplightEntryEnd &aEntry) {
+  std::size_t Ended = p_tree->cur_top;
   p_tree->endEntry(aEntry);
+  if (Streaming)
+    streamEnd(p_tree->parent_stack[Ended]);
 }
 
 void TemplightTreeWriter::initialize(const std::string &aSourceName) {
   this->initializeTree(aSourceName);
+  if (Streaming)
+    TraceClosing = crashClosingOfTrace();
 }
 
 void TemplightTreeWriter::finalize() {
-  std::vector<std::size_t> open_set;
-  std::vector<EntryTraversalTask> &tree = p_tree->parent_stack;
+  if (!Streaming) {
+    std::vector<std::size_t> open_set;
+    std::vector<EntryTraversalTask> &tree = p_tree->parent_stack;
 
-  for (std::size_t i = 0, i_end = tree.size(); i != i_end; ++i) {
-    while (!open_set.empty() && (i >= tree[open_set.back()].id_end)) {
+    for (std::size_t i = 0, i_end = tree.size(); i != i_end; ++i) {
+      while (!open_set.empty() && (i >= tree[open_set.back()].id_end)) {
+        closePrintedTreeNode(tree[open_set.back()]);
+        open_set.pop_back();
+      }
+      openPrintedTreeNode(tree[i]);
+      open_set.push_back(i);
+    }
+    while (!open_set.empty()) {
       closePrintedTreeNode(tree[open_set.back()]);
       open_set.pop_back();
     }
-    openPrintedTreeNode(tree[i]);
-    open_set.push_back(i);
-  }
-  while (!open_set.empty()) {
-    closePrintedTreeNode(tree[open_set.back()]);
-    open_set.pop_back();
   }
 
   this->finalizeTree();
 }
 
-TemplightNestedXMLWriter::TemplightNestedXMLWriter(llvm::raw_ostream &aOS)
-    : TemplightTreeWriter(aOS) {
+void TemplightTreeWriter::writeCrashClosing() {
+  // Innermost open entry first. Only prepared strings are written here.
+  for (std::size_t I = p_tree->cur_top; I != RecordedDFSEntryTree::invalid_id;
+       I = p_tree->parent_stack[I].parent_id) {
+    const std::string &Closing = p_tree->parent_stack[I].crash_closing;
+    OutputOS.write(Closing.data(), Closing.size());
+  }
+  OutputOS.write(TraceClosing.data(), TraceClosing.size());
+}
+
+TemplightNestedXMLWriter::TemplightNestedXMLWriter(llvm::raw_ostream &aOS,
+                                                   bool aStreaming)
+    : TemplightTreeWriter(aOS, aStreaming) {
   OutputOS << "<?xml version=\"1.0\" standalone=\"yes\"?>\n";
 }
 
@@ -366,22 +405,31 @@ void TemplightNestedXMLWriter::initializeTree(const std::string &aSourceName) {
 
 void TemplightNestedXMLWriter::finalizeTree() { OutputOS << "</Trace>\n"; }
 
+// The opening of an <Entry> tag up to the measurements, which only the end of
+// the instantiation provides.
+static void
+printNestedXMLEntryHead(llvm::raw_ostream &OS,
+                        const PrintableTemplightEntryBegin &BegEntry) {
+  std::string EscapedName = escapeXml(BegEntry.Name);
+
+  OS << llvm::format("<Entry Kind=\"%s\" Name=\"%s\" ",
+                     synthesisKindName(BegEntry.SynthesisKind),
+                     EscapedName.c_str());
+  OS << llvm::format("Location=\"%s|%d|%d\" ", BegEntry.FileName.c_str(),
+                     BegEntry.Line, BegEntry.Column);
+  if (!BegEntry.TempOri_FileName.empty()) {
+    OS << llvm::format("TemplateOrigin=\"%s|%d|%d\" ",
+                       BegEntry.TempOri_FileName.c_str(), BegEntry.TempOri_Line,
+                       BegEntry.TempOri_Column);
+  }
+}
+
 void TemplightNestedXMLWriter::openPrintedTreeNode(
     const EntryTraversalTask &aNode) {
   const PrintableTemplightEntryBegin &BegEntry = aNode.start;
   const PrintableTemplightEntryEnd &EndEntry = aNode.finish;
-  std::string EscapedName = escapeXml(BegEntry.Name);
 
-  OutputOS << llvm::format("<Entry Kind=\"%s\" Name=\"%s\" ",
-                           synthesisKindName(BegEntry.SynthesisKind),
-                           EscapedName.c_str());
-  OutputOS << llvm::format("Location=\"%s|%d|%d\" ", BegEntry.FileName.c_str(),
-                           BegEntry.Line, BegEntry.Column);
-  if (!BegEntry.TempOri_FileName.empty()) {
-    OutputOS << llvm::format("TemplateOrigin=\"%s|%d|%d\" ",
-                             BegEntry.TempOri_FileName.c_str(),
-                             BegEntry.TempOri_Line, BegEntry.TempOri_Column);
-  }
+  printNestedXMLEntryHead(OutputOS, BegEntry);
   OutputOS << llvm::format("Time=\"%.9f\" Memory=\"%d\">\n",
                            EndEntry.TimeStamp - BegEntry.TimeStamp,
                            EndEntry.MemoryUsage - BegEntry.MemoryUsage);
@@ -394,8 +442,32 @@ void TemplightNestedXMLWriter::closePrintedTreeNode(
   OutputOS << "</Entry>\n";
 }
 
-TemplightGraphMLWriter::TemplightGraphMLWriter(llvm::raw_ostream &aOS)
-    : TemplightTreeWriter(aOS), last_edge_id(0) {
+// Streaming: the time and memory of an entry, known only at its end, are an
+// <Exit> element closing it; an entry cut short by a crash has none.
+void TemplightNestedXMLWriter::streamBegin(const EntryTraversalTask &aNode) {
+  printNestedXMLEntryHead(OutputOS, aNode.start);
+  OutputOS << ">\n";
+}
+
+void TemplightNestedXMLWriter::streamEnd(const EntryTraversalTask &aNode) {
+  OutputOS << llvm::format("<Exit Time=\"%.9f\" Memory=\"%d\"/>\n",
+                           aNode.finish.TimeStamp - aNode.start.TimeStamp,
+                           aNode.finish.MemoryUsage - aNode.start.MemoryUsage);
+  OutputOS << "</Entry>\n";
+}
+
+std::string
+TemplightNestedXMLWriter::crashClosingOf(const EntryTraversalTask &aNode) {
+  return "</Entry>\n";
+}
+
+std::string TemplightNestedXMLWriter::crashClosingOfTrace() {
+  return "</Trace>\n";
+}
+
+TemplightGraphMLWriter::TemplightGraphMLWriter(llvm::raw_ostream &aOS,
+                                               bool aStreaming)
+    : TemplightTreeWriter(aOS, aStreaming), last_edge_id(0) {
   OutputOS << "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n"
               "<graphml xmlns=\"http://graphml.graphdrawing.org/xmlns\""
               " xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\""
@@ -417,6 +489,18 @@ TemplightGraphMLWriter::TemplightGraphMLWriter(llvm::raw_ostream &aOS)
               "</key>\n"
               "<key id=\"d5\" for=\"node\" attr.name=\"TemplateOrigin\" "
               "attr.type=\"string\"/>\n";
+  // Streaming writes a node when its instantiation begins, before its time
+  // and memory are known; they go on the edge from its parent, written when
+  // the instantiation ends.
+  if (Streaming)
+    OutputOS << "<key id=\"d6\" for=\"edge\" attr.name=\"Time\" "
+                "attr.type=\"double\">\n"
+                "<default>0.0</default>\n"
+                "</key>\n"
+                "<key id=\"d7\" for=\"edge\" attr.name=\"Memory\" "
+                "attr.type=\"long\">\n"
+                "<default>0</default>\n"
+                "</key>\n";
 }
 
 TemplightGraphMLWriter::~TemplightGraphMLWriter() {
@@ -425,6 +509,16 @@ TemplightGraphMLWriter::~TemplightGraphMLWriter() {
 
 void TemplightGraphMLWriter::initializeTree(const std::string &aSourceName) {
   OutputOS << "<graph>\n";
+  // Streaming: the translation unit is the parent of the top-level entries,
+  // so that their time and memory have an edge to go on.
+  if (Streaming) {
+    std::string EscapedSource = escapeXml(aSourceName);
+    OutputOS << llvm::format("<node id=\"tu\">\n"
+                             "  <data key=\"d0\">TranslationUnit</data>\n"
+                             "  <data key=\"d1\">\"%s\"</data>\n"
+                             "</node>\n",
+                             EscapedSource.c_str());
+  }
 }
 
 void TemplightGraphMLWriter::finalizeTree() { OutputOS << "</graph>\n"; }
@@ -436,19 +530,13 @@ void TemplightGraphMLWriter::openPrintedTreeNode(
 
   OutputOS << llvm::format("<node id=\"n%d\">\n", aNode.nd_id);
 
-  std::string EscapedName = escapeXml(BegEntry.Name);
-  OutputOS << llvm::format("  <data key=\"d0\">%s</data>\n"
-                           "  <data key=\"d1\">\"%s\"</data>\n"
-                           "  <data key=\"d2\">\"%s|%d|%d\"</data>\n",
-                           synthesisKindName(BegEntry.SynthesisKind),
-                           EscapedName.c_str(), BegEntry.FileName.c_str(),
-                           BegEntry.Line, BegEntry.Column);
+  printNodeData(BegEntry);
   OutputOS << llvm::format("  <data key=\"d3\">%.9f</data>\n"
                            "  <data key=\"d4\">%d</data>\n",
                            EndEntry.TimeStamp - BegEntry.TimeStamp,
                            EndEntry.MemoryUsage - BegEntry.MemoryUsage);
   if (!BegEntry.TempOri_FileName.empty()) {
-    OutputOS << llvm::format("  <data key=\"d2\">\"%s|%d|%d\"</data>\n",
+    OutputOS << llvm::format("  <data key=\"d5\">\"%s|%d|%d\"</data>\n",
                              BegEntry.TempOri_FileName.c_str(),
                              BegEntry.TempOri_Line, BegEntry.TempOri_Column);
   }
@@ -464,8 +552,62 @@ void TemplightGraphMLWriter::openPrintedTreeNode(
 void TemplightGraphMLWriter::closePrintedTreeNode(
     const EntryTraversalTask &aNode) {}
 
-TemplightGraphVizWriter::TemplightGraphVizWriter(llvm::raw_ostream &aOS)
-    : TemplightTreeWriter(aOS) {}
+void TemplightGraphMLWriter::printNodeData(
+    const PrintableTemplightEntryBegin &BegEntry) {
+  std::string EscapedName = escapeXml(BegEntry.Name);
+  OutputOS << llvm::format("  <data key=\"d0\">%s</data>\n"
+                           "  <data key=\"d1\">\"%s\"</data>\n"
+                           "  <data key=\"d2\">\"%s|%d|%d\"</data>\n",
+                           synthesisKindName(BegEntry.SynthesisKind),
+                           EscapedName.c_str(), BegEntry.FileName.c_str(),
+                           BegEntry.Line, BegEntry.Column);
+}
+
+// The streamed parent of a node: the translation unit for a top-level entry.
+static std::string graphMLParentID(const EntryTraversalTask &aNode) {
+  if (aNode.parent_id == RecordedDFSEntryTree::invalid_id)
+    return "tu";
+  return "n" + std::to_string(aNode.parent_id);
+}
+
+void TemplightGraphMLWriter::streamBegin(const EntryTraversalTask &aNode) {
+  const PrintableTemplightEntryBegin &BegEntry = aNode.start;
+
+  OutputOS << llvm::format("<node id=\"n%d\">\n", aNode.nd_id);
+  printNodeData(BegEntry);
+  if (!BegEntry.TempOri_FileName.empty()) {
+    OutputOS << llvm::format("  <data key=\"d5\">\"%s|%d|%d\"</data>\n",
+                             BegEntry.TempOri_FileName.c_str(),
+                             BegEntry.TempOri_Line, BegEntry.TempOri_Column);
+  }
+  OutputOS << "</node>\n";
+}
+
+void TemplightGraphMLWriter::streamEnd(const EntryTraversalTask &aNode) {
+  std::string Parent = graphMLParentID(aNode);
+  OutputOS << llvm::format("<edge id=\"e%d\" source=\"%s\" target=\"n%d\">\n",
+                           aNode.nd_id, Parent.c_str(), aNode.nd_id);
+  OutputOS << llvm::format("  <data key=\"d6\">%.9f</data>\n"
+                           "  <data key=\"d7\">%d</data>\n",
+                           aNode.finish.TimeStamp - aNode.start.TimeStamp,
+                           aNode.finish.MemoryUsage - aNode.start.MemoryUsage);
+  OutputOS << "</edge>\n";
+}
+
+std::string
+TemplightGraphMLWriter::crashClosingOf(const EntryTraversalTask &aNode) {
+  std::string ID = std::to_string(aNode.nd_id);
+  return "<edge id=\"e" + ID + "\" source=\"" + graphMLParentID(aNode) +
+         "\" target=\"n" + ID + "\"/>\n";
+}
+
+std::string TemplightGraphMLWriter::crashClosingOfTrace() {
+  return "</graph>\n</graphml>\n";
+}
+
+TemplightGraphVizWriter::TemplightGraphVizWriter(llvm::raw_ostream &aOS,
+                                                 bool aStreaming)
+    : TemplightTreeWriter(aOS, aStreaming) {}
 
 TemplightGraphVizWriter::~TemplightGraphVizWriter() {}
 
@@ -475,8 +617,8 @@ void TemplightGraphVizWriter::initializeTree(const std::string &aSourceName) {
 
 void TemplightGraphVizWriter::finalizeTree() { OutputOS << "}\n"; }
 
-void TemplightGraphVizWriter::openPrintedTreeNode(
-    const EntryTraversalTask &aNode) {
+void TemplightGraphVizWriter::printNodeLabel(const EntryTraversalTask &aNode,
+                                             bool WithMeasures) {
   const PrintableTemplightEntryBegin &BegEntry = aNode.start;
   const PrintableTemplightEntryEnd &EndEntry = aNode.finish;
 
@@ -493,9 +635,18 @@ void TemplightGraphVizWriter::openPrintedTreeNode(
                              BegEntry.TempOri_FileName.c_str(),
                              BegEntry.TempOri_Line, BegEntry.TempOri_Column);
   }
+  if (!WithMeasures) {
+    OutputOS << "\" ];\n";
+    return;
+  }
   OutputOS << llvm::format("Time: %.9f seconds Memory: %d bytes\" ];\n",
                            EndEntry.TimeStamp - BegEntry.TimeStamp,
                            EndEntry.MemoryUsage - BegEntry.MemoryUsage);
+}
+
+void TemplightGraphVizWriter::openPrintedTreeNode(
+    const EntryTraversalTask &aNode) {
+  printNodeLabel(aNode, /*WithMeasures=*/true);
 
   if (aNode.parent_id == RecordedDFSEntryTree::invalid_id)
     return;
@@ -505,5 +656,28 @@ void TemplightGraphVizWriter::openPrintedTreeNode(
 
 void TemplightGraphVizWriter::closePrintedTreeNode(
     const EntryTraversalTask &aNode) {}
+
+// Streaming: a node is declared when its instantiation begins and declared
+// again with its time and memory when it ends; the later label replaces the
+// earlier one.
+void TemplightGraphVizWriter::streamBegin(const EntryTraversalTask &aNode) {
+  printNodeLabel(aNode, /*WithMeasures=*/false);
+
+  if (aNode.parent_id == RecordedDFSEntryTree::invalid_id)
+    return;
+
+  OutputOS << llvm::format("n%d -> n%d;\n", aNode.parent_id, aNode.nd_id);
+}
+
+void TemplightGraphVizWriter::streamEnd(const EntryTraversalTask &aNode) {
+  printNodeLabel(aNode, /*WithMeasures=*/true);
+}
+
+std::string
+TemplightGraphVizWriter::crashClosingOf(const EntryTraversalTask &aNode) {
+  return "";
+}
+
+std::string TemplightGraphVizWriter::crashClosingOfTrace() { return "}\n"; }
 
 } // namespace clang

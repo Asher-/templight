@@ -20,11 +20,14 @@
 
 #include <llvm/Support/Format.h>
 #include <llvm/Support/Process.h>
+#include <llvm/Support/Signals.h>
 #include <llvm/Support/Timer.h>
 #include <llvm/Support/YAMLTraits.h>
 #include <llvm/Support/raw_ostream.h>
 
+#include <atomic>
 #include <cstdint>
+#include <mutex>
 #include <memory>
 #include <string>
 #include <vector>
@@ -319,14 +322,30 @@ static TemplightWriter *createWriter(const std::string &Format,
   if (Format == "text")
     return new TemplightTextWriter(OS);
   if (Format == "nestedxml")
-    return new TemplightNestedXMLWriter(OS);
+    return new TemplightNestedXMLWriter(OS, /*aStreaming=*/Safemode);
   if (Format == "graphml")
-    return new TemplightGraphMLWriter(OS);
+    return new TemplightGraphMLWriter(OS, /*aStreaming=*/Safemode);
   if (Format == "graphviz")
-    return new TemplightGraphVizWriter(OS);
+    return new TemplightGraphVizWriter(OS, /*aStreaming=*/Safemode);
   return new TemplightProtobufWriter(OS, /*aCompressLevel=*/2,
                                      /*aStreaming=*/Safemode);
 }
+
+namespace {
+// The safe-mode writer whose trace a crash must leave complete.
+std::atomic<TemplightWriter *> CrashWriter{nullptr};
+
+// Runs among LLVM's handlers for a crash signal (SIGSEGV, SIGILL, SIGTRAP,
+// SIGABRT, ...), on LLVM's alternate signal stack.
+void closeTraceOnCrash(void *) {
+  if (TemplightWriter *Writer = CrashWriter.exchange(nullptr))
+    Writer->writeCrashClosing();
+}
+
+void releaseCrashWriter(TemplightWriter *Writer) {
+  CrashWriter.compare_exchange_strong(Writer, nullptr);
+}
+} // namespace
 
 TemplightTracer::TemplightTracer(const Sema &TheSema, std::string Output,
                                  bool Memory, bool Safemode, bool IgnoreSystem,
@@ -351,10 +370,22 @@ TemplightTracer::TemplightTracer(const Sema &TheSema, std::string Output,
 
   Printer->takeWriter(
       createWriter(Format, *Printer->getTraceStream(), Safemode));
+
+  // In safe-mode a crash also writes what the format needs after the last
+  // entry (closing tags, the end of the graph), so the trace stays readable.
+  if (Safemode) {
+    static std::once_flag HandlerAdded;
+    std::call_once(HandlerAdded, [] {
+      llvm::sys::AddSignalHandler(closeTraceOnCrash, nullptr);
+    });
+    CrashWriter.store(Printer->getWriter());
+  }
 }
 
 TemplightTracer::~TemplightTracer() {
   // must be defined here due to TracePrinter being incomplete in header.
+  if (Printer)
+    releaseCrashWriter(Printer->getWriter());
 }
 
 void TemplightTracer::initialize(const Sema &) {
@@ -363,8 +394,11 @@ void TemplightTracer::initialize(const Sema &) {
 }
 
 void TemplightTracer::finalize(const Sema &) {
-  if (Printer)
+  if (Printer) {
+    // finalize() closes the trace itself; a later crash adds nothing.
+    releaseCrashWriter(Printer->getWriter());
     Printer->endTrace();
+  }
 }
 
 void TemplightTracer::readBlacklists(const std::string &BLFilename) {

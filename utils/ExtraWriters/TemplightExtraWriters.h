@@ -38,6 +38,7 @@ public:
 
 private:
   std::unique_ptr<llvm::yaml::Output> Output;
+  bool HasEntries = false;
 };
 
 class TemplightXmlWriter : public TemplightWriter {
@@ -67,9 +68,12 @@ public:
 struct RecordedDFSEntryTree;
 struct EntryTraversalTask;
 
+/// Writes the trace as a tree of instantiations. By default the tree is
+/// printed at finalize(); when streaming (safe-mode), each entry is written
+/// as it arrives and a crash closes the entries still open.
 class TemplightTreeWriter : public TemplightWriter {
 public:
-  TemplightTreeWriter(llvm::raw_ostream &aOS);
+  TemplightTreeWriter(llvm::raw_ostream &aOS, bool aStreaming = false);
   ~TemplightTreeWriter();
 
   void initialize(const std::string &aSourceName = "") override;
@@ -85,12 +89,30 @@ protected:
   virtual void initializeTree(const std::string &aSourceName) = 0;
   virtual void finalizeTree() = 0;
 
+  /// Streaming: write a node when its instantiation begins, and what is
+  /// known only at its end (time, memory) when it ends.
+  virtual void streamBegin(const EntryTraversalTask &aNode) = 0;
+  virtual void streamEnd(const EntryTraversalTask &aNode) = 0;
+  /// Streaming: what a crash writes to close a node still open, and then to
+  /// close the trace.
+  virtual std::string crashClosingOf(const EntryTraversalTask &aNode) = 0;
+  virtual std::string crashClosingOfTrace() = 0;
+
   std::unique_ptr<RecordedDFSEntryTree> p_tree;
+  bool Streaming;
+
+public:
+  /// Streaming: closes each entry still open, innermost first, and then the
+  /// trace, from closings prepared when the entries began.
+  void writeCrashClosing() override;
+
+private:
+  std::string TraceClosing;
 };
 
 class TemplightNestedXMLWriter : public TemplightTreeWriter {
 public:
-  TemplightNestedXMLWriter(llvm::raw_ostream &aOS);
+  TemplightNestedXMLWriter(llvm::raw_ostream &aOS, bool aStreaming = false);
   ~TemplightNestedXMLWriter();
 
 protected:
@@ -99,11 +121,16 @@ protected:
 
   void initializeTree(const std::string &aSourceName = "") override;
   void finalizeTree() override;
+
+  void streamBegin(const EntryTraversalTask &aNode) override;
+  void streamEnd(const EntryTraversalTask &aNode) override;
+  std::string crashClosingOf(const EntryTraversalTask &aNode) override;
+  std::string crashClosingOfTrace() override;
 };
 
 class TemplightGraphMLWriter : public TemplightTreeWriter {
 public:
-  TemplightGraphMLWriter(llvm::raw_ostream &aOS);
+  TemplightGraphMLWriter(llvm::raw_ostream &aOS, bool aStreaming = false);
   ~TemplightGraphMLWriter();
 
 protected:
@@ -113,13 +140,20 @@ protected:
   void initializeTree(const std::string &aSourceName = "") override;
   void finalizeTree() override;
 
+  void streamBegin(const EntryTraversalTask &aNode) override;
+  void streamEnd(const EntryTraversalTask &aNode) override;
+  std::string crashClosingOf(const EntryTraversalTask &aNode) override;
+  std::string crashClosingOfTrace() override;
+
 private:
+  void printNodeData(const PrintableTemplightEntryBegin &BegEntry);
+
   int last_edge_id;
 };
 
 class TemplightGraphVizWriter : public TemplightTreeWriter {
 public:
-  TemplightGraphVizWriter(llvm::raw_ostream &aOS);
+  TemplightGraphVizWriter(llvm::raw_ostream &aOS, bool aStreaming = false);
   ~TemplightGraphVizWriter();
 
 protected:
@@ -128,6 +162,14 @@ protected:
 
   void initializeTree(const std::string &aSourceName = "") override;
   void finalizeTree() override;
+
+  void streamBegin(const EntryTraversalTask &aNode) override;
+  void streamEnd(const EntryTraversalTask &aNode) override;
+  std::string crashClosingOf(const EntryTraversalTask &aNode) override;
+  std::string crashClosingOfTrace() override;
+
+private:
+  void printNodeLabel(const EntryTraversalTask &aNode, bool WithMeasures);
 };
 
 /*
