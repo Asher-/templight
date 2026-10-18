@@ -22,6 +22,7 @@
 #include <llvm/ADT/STLExtras.h>
 #include <llvm/ADT/SmallVector.h>
 
+#include <llvm/Config/llvm-config.h>
 #include <llvm/Support/Format.h>
 #include <llvm/Support/Process.h>
 #include <llvm/Support/Signals.h>
@@ -29,10 +30,15 @@
 #include <llvm/Support/YAMLTraits.h>
 #include <llvm/Support/raw_ostream.h>
 
+#ifdef LLVM_ON_UNIX
+#include <signal.h>
+#endif
+
 #include <atomic>
 #include <cstdint>
-#include <mutex>
+#include <cstdlib>
 #include <memory>
+#include <mutex>
 #include <string>
 #include <vector>
 
@@ -259,6 +265,8 @@ void TemplightTracer::atTemplateBegin(const Sema &TheSema,
   Entry.TimeStamp = Seconds(now.time_since_epoch()).count();
   Entry.MemoryUsage = (MemoryFlag ? llvm::sys::Process::GetMallocUsage() : 0);
 
+  if (SafeModeFlag)
+    installTemplightCrashSignalStack();
   Printer->printRawEntry(Entry, SafeModeFlag);
 }
 
@@ -284,6 +292,8 @@ void TemplightTracer::atTemplateEnd(const Sema &TheSema,
   Entry.TimeStamp = Seconds(now.time_since_epoch()).count();
   Entry.MemoryUsage = (MemoryFlag ? llvm::sys::Process::GetMallocUsage() : 0);
 
+  if (SafeModeFlag)
+    installTemplightCrashSignalStack();
   Printer->printRawEntry(Entry, SafeModeFlag);
 }
 
@@ -430,6 +440,45 @@ PrintableTemplightEntryDeclRead describeDecl(const Decl *D) {
 }
 } // namespace
 
+namespace {
+// The calling thread's alternate signal stack, freed when the thread exits.
+struct ThreadCrashSignalStack {
+  // Room for LLVM's stack-trace printer, which runs before Templight's handler.
+  static constexpr size_t Size = 1024 * 1024;
+  void *Memory = nullptr;
+  ThreadCrashSignalStack() {
+#ifdef LLVM_ON_UNIX
+    stack_t Current;
+    if (sigaltstack(nullptr, &Current) == 0 &&
+        !(Current.ss_flags & SS_DISABLE) && Current.ss_size >= Size)
+      return;
+    stack_t Stack = {};
+    Stack.ss_sp = Memory = malloc(Size);
+    Stack.ss_size = Size;
+    if (Memory && sigaltstack(&Stack, nullptr) != 0) {
+      free(Memory);
+      Memory = nullptr;
+    }
+#endif
+  }
+  ~ThreadCrashSignalStack() {
+#ifdef LLVM_ON_UNIX
+    if (!Memory)
+      return;
+    stack_t Disable = {};
+    Disable.ss_flags = SS_DISABLE;
+    sigaltstack(&Disable, nullptr);
+    free(Memory);
+#endif
+  }
+};
+} // namespace
+
+void installTemplightCrashSignalStack() {
+  static thread_local ThreadCrashSignalStack Stack;
+  (void)Stack;
+}
+
 void TemplightTracer::declRead(const Decl *D, llvm::StringRef ModuleName,
                                std::uint64_t StackDepthKB) {
   if (!Printer || Finalized)
@@ -443,6 +492,8 @@ void TemplightTracer::declRead(const Decl *D, llvm::StringRef ModuleName,
   PrintableTemplightEntryDeclRead Entry = describeDecl(D);
   Entry.ModuleName = ModuleName.str();
   Entry.StackDepthKB = StackDepthKB;
+  if (SafeModeFlag)
+    installTemplightCrashSignalStack();
   Printer->getWriter()->printDeclRead(Entry);
 }
 

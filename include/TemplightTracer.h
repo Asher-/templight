@@ -70,13 +70,19 @@ public:
   void readBlacklists(const std::string &BLFilename);
 
   /// -deserialization: the ASTReader read \p D from a module file of module
-  /// \p ModuleName, \p StackDepthKB below the frame that connected it.
+  /// \p ModuleName, \p StackDepthKB below the base of the stack it ran on.
   void declRead(const Decl *D, llvm::StringRef ModuleName,
                 std::uint64_t StackDepthKB);
 
 private:
   void printMergedDecls();
 };
+
+/// Gives the calling thread an alternate signal stack, once per thread, so that
+/// the handler closing a -safe-mode trace can run after that thread's stack
+/// overflows. Signal stacks are per thread, and clang runs deep recursion on
+/// threads of its own.
+void installTemplightCrashSignalStack();
 
 } // namespace clang
 

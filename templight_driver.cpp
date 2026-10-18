@@ -571,24 +571,11 @@ static void ExecuteTemplightCommand(
   }
 }
 
-// A deep template recursion can overflow the main thread's stack, and LLVM's
-// crash handlers then run on the alternate signal stack. Give that stack room
-// for the stack-trace printer that runs before Templight's handler, which
-// closes a -safe-mode trace. LLVM keeps an alternate stack at least as large
-// as its own.
-static void installCrashSignalStack() {
-#ifdef LLVM_ON_UNIX
-  const size_t Size = 1024 * 1024;
-  stack_t Stack = {};
-  Stack.ss_sp = malloc(Size);
-  Stack.ss_size = Size;
-  if (Stack.ss_sp && sigaltstack(&Stack, nullptr) != 0)
-    free(Stack.ss_sp);
-#endif
-}
-
 int main(int argc_, const char **argv_) {
-  installCrashSignalStack();
+  // A deep template recursion can overflow the main thread's stack; the
+  // handler closing a -safe-mode trace then needs an alternate signal stack.
+  // LLVM keeps one at least as large. The tracer gives clang's threads theirs.
+  clang::installTemplightCrashSignalStack();
   llvm::InitLLVM X(argc_, argv_);
 
   if (llvm::sys::Process::FixupStandardFileDescriptors())
