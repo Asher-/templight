@@ -26,19 +26,43 @@
 #include <llvm/Support/Regex.h>
 
 #include <algorithm>
+#include <cstdint>
+
+#if defined(__APPLE__) || defined(__linux__)
+#include <pthread.h>
+#endif
 
 namespace clang {
+
+// How far, in KB, the stack pointer is below the base of the calling thread's
+// stack. Clang runs deep recursion on threads of its own
+// (runWithSufficientStackSpace starts one with llvm::runOnNewStack), so a read
+// is measured on the stack it runs on, from that stack's base. 0 where the
+// platform does not report the thread's stack.
+static std::uint64_t currentStackDepthKB() {
+  uintptr_t Base = 0;
+#if defined(__APPLE__)
+  Base = reinterpret_cast<uintptr_t>(pthread_get_stackaddr_np(pthread_self()));
+#elif defined(__linux__)
+  pthread_attr_t Attr;
+  if (pthread_getattr_np(pthread_self(), &Attr) == 0) {
+    void *Addr = nullptr;
+    size_t Size = 0;
+    if (pthread_attr_getstack(&Attr, &Addr, &Size) == 0)
+      Base = reinterpret_cast<uintptr_t>(Addr) + Size;
+    pthread_attr_destroy(&Attr);
+  }
+#endif
+  uintptr_t SP = llvm::getStackPointer();
+  return Base > SP ? (Base - SP) / 1024 : 0;
+}
 
 // Reports each declaration the ASTReader reads to the tracer, with the module
 // of the module file it came from and the stack depth at the read.
 class TemplightDeserializationListener : public ASTDeserializationListener {
 public:
-  // Starts reporting to \p T, measuring stack depth below \p Base, or stops
-  // when \p T is null.
-  void connect(TemplightTracer *T, uintptr_t Base) {
-    Tracer = T;
-    StackBase = Base;
-  }
+  // Starts reporting to \p T, or stops when \p T is null.
+  void connect(TemplightTracer *T) { Tracer = T; }
 
   void ReaderInitialized(ASTReader *R) override { Reader = R; }
 
@@ -48,17 +72,12 @@ public:
     serialization::ModuleFile *MF = Reader->getOwningModuleFile(D);
     if (!MF)
       return;
-    uintptr_t SP = llvm::getStackPointer();
-    // A read on another stack (runWithSufficientStackSpace's) has no
-    // depth below the base.
-    std::uint64_t DepthKB = StackBase > SP ? (StackBase - SP) / 1024 : 0;
-    Tracer->declRead(D, MF->ModuleName, DepthKB);
+    Tracer->declRead(D, MF->ModuleName, currentStackDepthKB());
   }
 
 private:
   ASTReader *Reader = nullptr;
   TemplightTracer *Tracer = nullptr;
-  uintptr_t StackBase = 0;
 };
 
 namespace {
@@ -175,7 +194,7 @@ void TemplightAction::ExecuteAction() {
                             OutputInSafeMode, IgnoreSystemInst, OutputFormat));
     p_t->readBlacklists(BlackListFilename);
     if (DeserializationListener)
-      DeserializationListener->connect(p_t.get(), llvm::getStackPointer());
+      DeserializationListener->connect(p_t.get());
     CI.getSema().TemplateInstCallbacks.push_back(std::move(p_t));
   }
   if (InteractiveDebug) {
@@ -191,7 +210,7 @@ void TemplightAction::ExecuteAction() {
 }
 void TemplightAction::EndSourceFileAction() {
   if (DeserializationListener)
-    DeserializationListener->connect(nullptr, 0);
+    DeserializationListener->connect(nullptr);
   WrapperFrontendAction::EndSourceFileAction();
 }
 
