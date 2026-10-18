@@ -17,18 +17,53 @@
 
 namespace clang {
 
+// The names of Sema::CodeSynthesisContext::SynthesisKind, in enum order.
 static const char *const SynthesisKindStrings[] = {
     "TemplateInstantiation",
     "DefaultTemplateArgumentInstantiation",
     "DefaultFunctionArgumentInstantiation",
     "ExplicitTemplateArgumentSubstitution",
     "DeducedTemplateArgumentSubstitution",
+    "LambdaExpressionSubstitution",
     "PriorTemplateArgumentSubstitution",
     "DefaultTemplateArgumentChecking",
+    "ExceptionSpecEvaluation",
     "ExceptionSpecInstantiation",
+    "RequirementInstantiation",
+    "NestedRequirementConstraintsCheck",
     "DeclaringSpecialMember",
+    "DeclaringImplicitEqualityComparison",
     "DefiningSynthesizedFunction",
-    "Memoization"};
+    "ConstraintsCheck",
+    "ConstraintSubstitution",
+    "RequirementParameterInstantiation",
+    "ParameterMappingSubstitution",
+    "RewritingOperatorAsSpaceship",
+    "InitializingStructuredBinding",
+    "MarkingClassDllexported",
+    "BuildingBuiltinDumpStructCall",
+    "Memoization",
+    "BuildingDeductionGuides",
+    "TypeAliasTemplateInstantiation",
+    "PartialOrderingTTP",
+    "SYCLKernelLaunchLookup",
+    "SYCLKernelLaunchOverloadResolution",
+    "ExpansionStmtInstantiation"};
+
+static_assert(Sema::CodeSynthesisContext::Memoization == 23 &&
+                  Sema::CodeSynthesisContext::ExpansionStmtInstantiation ==
+                      sizeof(SynthesisKindStrings) /
+                              sizeof(SynthesisKindStrings[0]) -
+                          1,
+              "SynthesisKindStrings is out of step with clang's SynthesisKind");
+
+static const char *synthesisKindName(int Kind) {
+  if (Kind < 0 || static_cast<std::size_t>(Kind) >=
+                      sizeof(SynthesisKindStrings) /
+                          sizeof(SynthesisKindStrings[0]))
+    return "Unknown";
+  return SynthesisKindStrings[Kind];
+}
 
 static std::string escapeXml(const std::string &Input) {
   std::string Result;
@@ -75,7 +110,7 @@ struct ScalarEnumerationTraits<
   static void
   enumeration(IO &io, clang::Sema::CodeSynthesisContext::SynthesisKind &value) {
 
-#define def_enum_case(e) io.enumCase(value, SynthesisKindStrings[e], e)
+#define def_enum_case(e) io.enumCase(value, clang::synthesisKindName(e), e)
 
     using CodeSynthesisContext = clang::Sema::CodeSynthesisContext;
     def_enum_case(CodeSynthesisContext::TemplateInstantiation);
@@ -99,7 +134,7 @@ template <> struct MappingTraits<clang::PrintableTemplightEntryBegin> {
     bool b = true;
     io.mapRequired("IsBegin", b);
     // must be converted to string before, due to some BS with yaml traits.
-    std::string kind = clang::SynthesisKindStrings[Entry.SynthesisKind];
+    std::string kind = clang::synthesisKindName(Entry.SynthesisKind);
     io.mapRequired("Kind", kind);
     io.mapOptional("Name", Entry.Name);
     std::string loc = Entry.FileName + "|" + std::to_string(Entry.Line) + "|" +
@@ -184,7 +219,7 @@ void TemplightXmlWriter::printEntry(
                            "    <Kind>%s</Kind>\n"
                            "    <Context context = \"%s\"/>\n"
                            "    <Location>%s|%d|%d</Location>\n",
-                           SynthesisKindStrings[aEntry.SynthesisKind],
+                           synthesisKindName(aEntry.SynthesisKind),
                            EscapedName.c_str(), aEntry.FileName.c_str(),
                            aEntry.Line, aEntry.Column);
   OutputOS << llvm::format("    <TimeStamp time = \"%.9f\"/>\n"
@@ -223,7 +258,7 @@ void TemplightTextWriter::printEntry(
                            "  Kind = %s\n"
                            "  Name = %s\n"
                            "  Location = %s|%d|%d\n",
-                           SynthesisKindStrings[aEntry.SynthesisKind],
+                           synthesisKindName(aEntry.SynthesisKind),
                            aEntry.Name.c_str(), aEntry.FileName.c_str(),
                            aEntry.Line, aEntry.Column);
   OutputOS << llvm::format("  TimeStamp = %.9f\n"
@@ -338,7 +373,7 @@ void TemplightNestedXMLWriter::openPrintedTreeNode(
   std::string EscapedName = escapeXml(BegEntry.Name);
 
   OutputOS << llvm::format("<Entry Kind=\"%s\" Name=\"%s\" ",
-                           SynthesisKindStrings[BegEntry.SynthesisKind],
+                           synthesisKindName(BegEntry.SynthesisKind),
                            EscapedName.c_str());
   OutputOS << llvm::format("Location=\"%s|%d|%d\" ", BegEntry.FileName.c_str(),
                            BegEntry.Line, BegEntry.Column);
@@ -405,7 +440,7 @@ void TemplightGraphMLWriter::openPrintedTreeNode(
   OutputOS << llvm::format("  <data key=\"d0\">%s</data>\n"
                            "  <data key=\"d1\">\"%s\"</data>\n"
                            "  <data key=\"d2\">\"%s|%d|%d\"</data>\n",
-                           SynthesisKindStrings[BegEntry.SynthesisKind],
+                           synthesisKindName(BegEntry.SynthesisKind),
                            EscapedName.c_str(), BegEntry.FileName.c_str(),
                            BegEntry.Line, BegEntry.Column);
   OutputOS << llvm::format("  <data key=\"d3\">%.9f</data>\n"
@@ -450,7 +485,7 @@ void TemplightGraphVizWriter::openPrintedTreeNode(
            << llvm::format("\"%s\\n"
                            "%s\\n"
                            "At %s Line %d Column %d\\n",
-                           SynthesisKindStrings[BegEntry.SynthesisKind],
+                           synthesisKindName(BegEntry.SynthesisKind),
                            EscapedName.c_str(), BegEntry.FileName.c_str(),
                            BegEntry.Line, BegEntry.Column);
   if (!BegEntry.TempOri_FileName.empty()) {
