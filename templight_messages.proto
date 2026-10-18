@@ -50,12 +50,30 @@ message TemplightEntry {
     optional uint64 memory_usage = 2;
   }
 
+  // -deserialization: a declaration the ASTReader read from a module file.
+  message DeclRead {
+    required string kind = 1;
+    required TemplateName name = 2;
+    required string module_name = 3;
+    required uint64 stack_depth_kb = 4;
+  }
+
+  // -deserialization, at the end of the translation unit: a canonical
+  // declaration read from two or more module files, and those files' modules.
+  message MergedDecl {
+    required string kind = 1;
+    required TemplateName name = 2;
+    repeated string module_names = 3;
+  }
+
 //   oneof begin_or_end {
 //     Begin begin = 1;
 //     End end = 2;
 //   }
   optional Begin begin = 1;
   optional End end = 2;
+  optional DeclRead decl_read = 3;
+  optional MergedDecl merged_decl = 4;
 }
 
 message DictionaryEntry {
