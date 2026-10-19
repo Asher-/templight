@@ -464,15 +464,6 @@ static int ExecuteTemplightInvocation(CompilerInstance *Clang) {
   if (Clang->getDiagnostics().hasErrorOccurred())
     return 1;
 
-  // Refuse an unknown trace format before anything, the trace file included,
-  // is written.
-  if (!TemplightTracer::isFormat(OutputFormat)) {
-    llvm::errs() << "error: [Templight] unknown trace format '" << OutputFormat
-                 << "'; accepted formats: " << TemplightTracer::formatList()
-                 << "\n";
-    return 1;
-  }
-
   // Create and execute the frontend action.
   std::unique_ptr<TemplightAction> Act(
       new TemplightAction(CreateFrontendAction(*Clang)));
@@ -685,6 +676,15 @@ int main(int argc_, const char **argv_) {
   cl::ParseCommandLineOptions(
       TemplightArgs.size(), &TemplightArgs[0],
       "A tool to profile template instantiations in C++ code.\n");
+
+  // Refuse an unknown trace format before anything, the trace file included,
+  // is written, whether templight runs as -cc1 or as the driver.
+  if (!TemplightTracer::isFormat(OutputFormat)) {
+    llvm::errs() << "error: [Templight] unknown trace format '" << OutputFormat
+                 << "'; accepted formats: " << TemplightTracer::formatList()
+                 << "\n";
+    return 1;
+  }
 
   bool CanonicalPrefixes = true;
   for (int i = 1, size = ClangArgs.size(); i < size; ++i) {
