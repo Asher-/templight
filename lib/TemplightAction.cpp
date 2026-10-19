@@ -72,7 +72,10 @@ public:
     serialization::ModuleFile *MF = Reader->getOwningModuleFile(D);
     if (!MF)
       return;
-    Tracer->declRead(D, MF->ModuleName, currentStackDepthKB());
+    // A precompiled header has no module name, so its file names it.
+    StringRef Module =
+        MF->ModuleName.empty() ? MF->FileName.str() : StringRef(MF->ModuleName);
+    Tracer->declRead(D, Module, currentStackDepthKB());
   }
 
 private:
