@@ -33,16 +33,53 @@ namespace clang {
 
 namespace {
 
+// The names of Sema::CodeSynthesisContext::SynthesisKind, in enum order.
 const char *const SynthesisKindStrings[] = {
     "template instantiation",
     "default template-argument instantiation",
     "default function-argument instantiation",
     "explicit template-argument substitution",
     "deduced template-argument substitution",
+    "lambda expression substitution",
     "prior template-argument substitution",
     "default template-argument checking",
+    "exception specification evaluation",
     "exception specification instantiation",
-    "memoization"};
+    "requirement instantiation",
+    "nested requirement constraints check",
+    "declaring special member",
+    "declaring implicit equality comparison",
+    "defining synthesized function",
+    "constraints check",
+    "constraint substitution",
+    "requirement parameter instantiation",
+    "parameter mapping substitution",
+    "rewriting operator as spaceship",
+    "initializing structured binding",
+    "marking class dllexported",
+    "building builtin dump struct call",
+    "memoization",
+    "building deduction guides",
+    "type alias template instantiation",
+    "partial ordering of template template parameters",
+    "SYCL kernel launch lookup",
+    "SYCL kernel launch overload resolution",
+    "expansion statement instantiation"};
+
+static_assert(Sema::CodeSynthesisContext::Memoization == 23 &&
+                  Sema::CodeSynthesisContext::ExpansionStmtInstantiation ==
+                      sizeof(SynthesisKindStrings) /
+                              sizeof(SynthesisKindStrings[0]) -
+                          1,
+              "SynthesisKindStrings is out of step with clang's SynthesisKind");
+
+const char *synthesisKindName(int Kind) {
+  if (Kind < 0 ||
+      static_cast<std::size_t>(Kind) >=
+          sizeof(SynthesisKindStrings) / sizeof(SynthesisKindStrings[0]))
+    return "unknown synthesis";
+  return SynthesisKindStrings[Kind];
+}
 
 struct TemplateDebuggerEntry {
   bool IsTemplateBegin;
@@ -569,8 +606,8 @@ class TemplightDebugger::InteractiveAgent {
 public:
   void printEntryImpl(const TemplateDebuggerEntry &Entry) {
     llvm::outs() << ((Entry.IsTemplateBegin) ? "Entering " : "Leaving  ")
-                 << SynthesisKindStrings[Entry.Inst.Kind] << " of "
-                 << Entry.Name << '\n'
+                 << synthesisKindName(Entry.Inst.Kind) << " of " << Entry.Name
+                 << '\n'
                  << "  at " << Entry.FileName << ':' << Entry.Line << ':'
                  << Entry.Column << " (Memory usage: " << Entry.MemoryUsage
                  << ")\n";
@@ -978,9 +1015,9 @@ public:
         for (std::vector<TemplateDebuggerEntry>::reverse_iterator it =
                  EntriesStack.rbegin();
              it != EntriesStack.rend(); ++it) {
-          llvm::outs() << SynthesisKindStrings[it->Inst.Kind] << " of "
-                       << it->Name << " at " << it->FileName << ':' << it->Line
-                       << ':' << it->Column << '\n';
+          llvm::outs() << synthesisKindName(it->Inst.Kind) << " of " << it->Name
+                       << " at " << it->FileName << ':' << it->Line << ':'
+                       << it->Column << '\n';
         }
         continue;
       } else {
