@@ -29,9 +29,11 @@ private:
 
   void loadHeader(llvm::StringRef aSubBuffer);
   void loadDictionaryEntry(llvm::StringRef aSubBuffer);
-  void loadTemplateName(llvm::StringRef aSubBuffer);
+  void loadTemplateName(llvm::StringRef aSubBuffer, std::string &Name);
   void loadBeginEntry(llvm::StringRef aSubBuffer);
   void loadEndEntry(llvm::StringRef aSubBuffer);
+  void loadDeclRead(llvm::StringRef aSubBuffer);
+  void loadMergedDecl(llvm::StringRef aSubBuffer);
 
 public:
   enum LastChunkType {
@@ -39,7 +41,9 @@ public:
     Header,
     BeginEntry,
     EndEntry,
-    Other
+    Other,
+    DeclReadEntry,
+    MergedDeclEntry
   } LastChunk;
 
   unsigned int Version;
@@ -47,6 +51,8 @@ public:
 
   PrintableTemplightEntryBegin LastBeginEntry;
   PrintableTemplightEntryEnd LastEndEntry;
+  PrintableTemplightEntryDeclRead LastDeclRead;
+  PrintableTemplightEntryMergedDecl LastMergedDecl;
 
   TemplightProtobufReader();
 

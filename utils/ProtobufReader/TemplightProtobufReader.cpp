@@ -119,31 +119,30 @@ static void loadLocation(llvm::StringRef aSubBuffer,
   } // else we don't care?
 }
 
-void TemplightProtobufReader::loadTemplateName(llvm::StringRef aSubBuffer) {
+void TemplightProtobufReader::loadTemplateName(llvm::StringRef aSubBuffer,
+                                               std::string &Name) {
   // Set default values:
-  LastBeginEntry.Name = "";
+  Name = "";
 
   while (aSubBuffer.size()) {
     unsigned int cur_wire = llvm::protobuf::loadVarInt(aSubBuffer);
     switch (cur_wire) {
     case llvm::protobuf::getStringWire<1>::value:
-      LastBeginEntry.Name = llvm::protobuf::loadString(aSubBuffer);
+      Name = llvm::protobuf::loadString(aSubBuffer);
       break;
     case llvm::protobuf::getStringWire<2>::value: {
-      LastBeginEntry.Name = llvm::protobuf::loadString(aSubBuffer);
+      Name = llvm::protobuf::loadString(aSubBuffer);
       llvm::SmallVector<uint8_t, 32> UBuf;
       if (llvm::Error E = llvm::compression::zlib::decompress(
-              llvm::arrayRefFromStringRef(LastBeginEntry.Name), UBuf,
-              LastBeginEntry.Name.size() * 2)) {
+              llvm::arrayRefFromStringRef(Name), UBuf, Name.size() * 2)) {
         llvm::consumeError(std::move(E));
-        LastBeginEntry.Name = "";
+        Name = "";
       } else
-        LastBeginEntry.Name = llvm::toStringRef(UBuf).str();
+        Name = llvm::toStringRef(UBuf).str();
       break;
     }
     case llvm::protobuf::getVarIntWire<3>::value: {
-      LastBeginEntry.Name =
-          templateNameMap[llvm::protobuf::loadVarInt(aSubBuffer)];
+      Name = templateNameMap[llvm::protobuf::loadVarInt(aSubBuffer)];
       break;
     }
     default:
@@ -168,7 +167,7 @@ void TemplightProtobufReader::loadBeginEntry(llvm::StringRef aSubBuffer) {
       break;
     case llvm::protobuf::getStringWire<2>::value: {
       std::uint64_t cur_size = llvm::protobuf::loadVarInt(aSubBuffer);
-      loadTemplateName(aSubBuffer.slice(0, cur_size));
+      loadTemplateName(aSubBuffer.slice(0, cur_size), LastBeginEntry.Name);
       aSubBuffer = aSubBuffer.drop_front(cur_size);
       break;
     }
@@ -226,6 +225,71 @@ void TemplightProtobufReader::loadEndEntry(llvm::StringRef aSubBuffer) {
   LastChunk = TemplightProtobufReader::EndEntry;
 }
 
+void TemplightProtobufReader::loadDeclRead(llvm::StringRef aSubBuffer) {
+  // Set default values:
+  LastDeclRead.Kind = "";
+  LastDeclRead.Name = "";
+  LastDeclRead.ModuleName = "";
+  LastDeclRead.StackDepthKB = 0;
+
+  while (aSubBuffer.size()) {
+    unsigned int cur_wire = llvm::protobuf::loadVarInt(aSubBuffer);
+    switch (cur_wire) {
+    case llvm::protobuf::getStringWire<1>::value:
+      LastDeclRead.Kind = llvm::protobuf::loadString(aSubBuffer);
+      break;
+    case llvm::protobuf::getStringWire<2>::value: {
+      std::uint64_t cur_size = llvm::protobuf::loadVarInt(aSubBuffer);
+      loadTemplateName(aSubBuffer.slice(0, cur_size), LastDeclRead.Name);
+      aSubBuffer = aSubBuffer.drop_front(cur_size);
+      break;
+    }
+    case llvm::protobuf::getStringWire<3>::value:
+      LastDeclRead.ModuleName = llvm::protobuf::loadString(aSubBuffer);
+      break;
+    case llvm::protobuf::getVarIntWire<4>::value:
+      LastDeclRead.StackDepthKB = llvm::protobuf::loadVarInt(aSubBuffer);
+      break;
+    default:
+      llvm::protobuf::skipData(aSubBuffer, cur_wire);
+      break;
+    }
+  }
+
+  LastChunk = TemplightProtobufReader::DeclReadEntry;
+}
+
+void TemplightProtobufReader::loadMergedDecl(llvm::StringRef aSubBuffer) {
+  // Set default values:
+  LastMergedDecl.Kind = "";
+  LastMergedDecl.Name = "";
+  LastMergedDecl.ModuleNames.clear();
+
+  while (aSubBuffer.size()) {
+    unsigned int cur_wire = llvm::protobuf::loadVarInt(aSubBuffer);
+    switch (cur_wire) {
+    case llvm::protobuf::getStringWire<1>::value:
+      LastMergedDecl.Kind = llvm::protobuf::loadString(aSubBuffer);
+      break;
+    case llvm::protobuf::getStringWire<2>::value: {
+      std::uint64_t cur_size = llvm::protobuf::loadVarInt(aSubBuffer);
+      loadTemplateName(aSubBuffer.slice(0, cur_size), LastMergedDecl.Name);
+      aSubBuffer = aSubBuffer.drop_front(cur_size);
+      break;
+    }
+    case llvm::protobuf::getStringWire<3>::value:
+      LastMergedDecl.ModuleNames.push_back(
+          llvm::protobuf::loadString(aSubBuffer));
+      break;
+    default:
+      llvm::protobuf::skipData(aSubBuffer, cur_wire);
+      break;
+    }
+  }
+
+  LastChunk = TemplightProtobufReader::MergedDeclEntry;
+}
+
 TemplightProtobufReader::LastChunkType
 TemplightProtobufReader::startOnBuffer(llvm::StringRef aBuffer) {
   buffer = aBuffer;
@@ -275,6 +339,12 @@ TemplightProtobufReader::LastChunkType TemplightProtobufReader::next() {
       break;
     case llvm::protobuf::getStringWire<2>::value:
       loadEndEntry(sub_buffer);
+      break;
+    case llvm::protobuf::getStringWire<3>::value:
+      loadDeclRead(sub_buffer);
+      break;
+    case llvm::protobuf::getStringWire<4>::value:
+      loadMergedDecl(sub_buffer);
       break;
     default: // ignore for fwd-compat.
       break;
