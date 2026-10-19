@@ -565,8 +565,9 @@ static void ExecuteTemplightCommand(
 int main(int argc_, const char **argv_) {
   // A deep template recursion can overflow the main thread's stack; the
   // handler closing a -safe-mode trace then needs an alternate signal stack.
-  // LLVM keeps one at least as large. Clang's own threads get theirs as they
-  // start on Darwin, and elsewhere when they first write a trace entry.
+  // LLVM keeps one at least as large. Every thread started after this call
+  // gets its own as it starts: on Darwin through the thread-start hook,
+  // elsewhere through templight's pthread_create interposer.
   clang::installTemplightCrashSignalStack();
   llvm::InitLLVM X(argc_, argv_);
 

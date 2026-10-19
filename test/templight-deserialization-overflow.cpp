@@ -44,5 +44,5 @@ P B;
 
 // NESTEDXML: Name="T100" Module="Deep" StackDepthKB="{{[0-9]+}}"/>
 // NESTEDXML-NOT: Name="P"
-// NESTEDXML: <UnfinishedDeclRead Kind="Typedef" Name="P" Module="Deep"
-// StackDepthKB="{{[0-9]+}}"/> NESTEDXML: </Trace>
+// NESTEDXML: <UnfinishedDeclRead Kind="Typedef" Name="P" Module="Deep" StackDepthKB="{{[0-9]+}}"/>
+// NESTEDXML: </Trace>
