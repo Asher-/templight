@@ -39,6 +39,10 @@ target_link_libraries(templight
 
 set_target_properties(templight PROPERTIES VERSION ${CLANG_EXECUTABLE_VERSION})
 
+# A plugin loaded with -load (the lit tests' TemplightIllegalInstruction) links
+# against clang's symbols in the executable, as clang's own driver exports them.
+export_executable_symbols_for_plugins(templight)
+
 add_dependencies(templight clang-headers)
 
 if(UNIX)
