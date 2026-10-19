@@ -74,6 +74,9 @@ message TemplightEntry {
   optional End end = 2;
   optional DeclRead decl_read = 3;
   optional MergedDecl merged_decl = 4;
+  // -deserialization, under -safe-mode, written by a crash: a declaration
+  // whose read the crash cut short, with the stack depth at which it began.
+  optional DeclRead unfinished_decl_read = 5;
 }
 
 message DictionaryEntry {

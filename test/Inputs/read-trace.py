@@ -95,8 +95,9 @@ def main():
                                   location(parts.get(3, b""), files)))
                         elif kind == 2:
                             print("end")
-                        elif kind == 3:
-                            print("decl-read kind=%s name=%s module=%s stack-kb=%d" % (
+                        elif kind in (3, 5):
+                            print("%s kind=%s name=%s module=%s stack-kb=%d" % (
+                                  "decl-read" if kind == 3 else "unfinished-decl-read",
                                   parts.get(1, b"").decode(), template_name(dictionary, parts.get(2, b"")),
                                   parts.get(3, b"").decode(), parts.get(4, 0)))
                         elif kind == 4:

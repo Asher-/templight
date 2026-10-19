@@ -39,11 +39,21 @@ public:
   void
   printMergedDecl(const PrintableTemplightEntryMergedDecl &aEntry) override;
 
+  void writeCrashClosing() override;
+
+protected:
+  std::string unfinishedDeclReadText(
+      const PrintableTemplightEntryDeclRead &aEntry) override;
+
 private:
   // Writes one sequence element, as printEntry does.
   template <typename EntryT> void printElement(EntryT &Entry);
+  // Writes what Output wrote since the last call, with one write.
+  void writePending();
+  std::string Pending;
+  llvm::raw_string_ostream PendingOS;
   std::unique_ptr<llvm::yaml::Output> Output;
-  bool HasEntries = false;
+  std::atomic<bool> HasElements{false};
 };
 
 class TemplightXmlWriter : public TemplightWriter {
@@ -59,6 +69,10 @@ public:
   void printDeclRead(const PrintableTemplightEntryDeclRead &aEntry) override;
   void
   printMergedDecl(const PrintableTemplightEntryMergedDecl &aEntry) override;
+
+protected:
+  std::string unfinishedDeclReadText(
+      const PrintableTemplightEntryDeclRead &aEntry) override;
 };
 
 class TemplightTextWriter : public TemplightWriter {
@@ -74,6 +88,10 @@ public:
   void printDeclRead(const PrintableTemplightEntryDeclRead &aEntry) override;
   void
   printMergedDecl(const PrintableTemplightEntryMergedDecl &aEntry) override;
+
+protected:
+  std::string unfinishedDeclReadText(
+      const PrintableTemplightEntryDeclRead &aEntry) override;
 };
 
 struct RecordedDFSEntryTree;
@@ -100,10 +118,10 @@ protected:
   virtual void initializeTree(const std::string &aSourceName) = 0;
   virtual void finalizeTree() = 0;
 
-  /// Streaming: write a node when its instantiation begins, and what is
-  /// known only at its end (time, memory) when it ends.
-  virtual void streamBegin(const EntryTraversalTask &aNode) = 0;
-  virtual void streamEnd(const EntryTraversalTask &aNode) = 0;
+  /// Streaming: what is written for a node when its instantiation begins,
+  /// and what is known only at its end (time, memory) when it ends.
+  virtual std::string streamedBegin(const EntryTraversalTask &aNode) = 0;
+  virtual std::string streamedEnd(const EntryTraversalTask &aNode) = 0;
   /// Streaming: what a crash writes to close a node still open, and then to
   /// close the trace.
   virtual std::string crashClosingOf(const EntryTraversalTask &aNode) = 0;
@@ -111,14 +129,6 @@ protected:
 
   std::unique_ptr<RecordedDFSEntryTree> p_tree;
   bool Streaming;
-
-public:
-  /// Streaming: closes each entry still open, innermost first, and then the
-  /// trace, from closings prepared when the entries began.
-  void writeCrashClosing() override;
-
-private:
-  std::string TraceClosing;
 };
 
 class TemplightNestedXMLWriter : public TemplightTreeWriter {
@@ -137,10 +147,12 @@ protected:
   void initializeTree(const std::string &aSourceName = "") override;
   void finalizeTree() override;
 
-  void streamBegin(const EntryTraversalTask &aNode) override;
-  void streamEnd(const EntryTraversalTask &aNode) override;
+  std::string streamedBegin(const EntryTraversalTask &aNode) override;
+  std::string streamedEnd(const EntryTraversalTask &aNode) override;
   std::string crashClosingOf(const EntryTraversalTask &aNode) override;
   std::string crashClosingOfTrace() override;
+  std::string unfinishedDeclReadText(
+      const PrintableTemplightEntryDeclRead &aEntry) override;
 
 private:
   // -deserialization elements held until finalizeTree() when not streaming.
@@ -163,16 +175,20 @@ protected:
   void initializeTree(const std::string &aSourceName = "") override;
   void finalizeTree() override;
 
-  void streamBegin(const EntryTraversalTask &aNode) override;
-  void streamEnd(const EntryTraversalTask &aNode) override;
+  std::string streamedBegin(const EntryTraversalTask &aNode) override;
+  std::string streamedEnd(const EntryTraversalTask &aNode) override;
   std::string crashClosingOf(const EntryTraversalTask &aNode) override;
   std::string crashClosingOfTrace() override;
+  std::string unfinishedDeclReadText(
+      const PrintableTemplightEntryDeclRead &aEntry) override;
 
 private:
   // -deserialization nodes held until finalizeTree() when not streaming.
   std::string PendingDecls;
   std::size_t DeclNodes = 0;
-  void printNodeData(const PrintableTemplightEntryBegin &BegEntry);
+  std::size_t UnfinishedNodes = 0;
+  void printNodeData(llvm::raw_ostream &OS,
+                     const PrintableTemplightEntryBegin &BegEntry);
 
   int last_edge_id;
 };
@@ -193,18 +209,22 @@ protected:
   void initializeTree(const std::string &aSourceName = "") override;
   void finalizeTree() override;
 
-  void streamBegin(const EntryTraversalTask &aNode) override;
-  void streamEnd(const EntryTraversalTask &aNode) override;
+  std::string streamedBegin(const EntryTraversalTask &aNode) override;
+  std::string streamedEnd(const EntryTraversalTask &aNode) override;
   std::string crashClosingOf(const EntryTraversalTask &aNode) override;
   std::string crashClosingOfTrace() override;
+  std::string unfinishedDeclReadText(
+      const PrintableTemplightEntryDeclRead &aEntry) override;
 
 private:
-  void printNodeLabel(const EntryTraversalTask &aNode, bool WithMeasures);
+  void printNodeLabel(llvm::raw_ostream &OS, const EntryTraversalTask &aNode,
+                      bool WithMeasures);
 
 private:
   // -deserialization nodes held until finalizeTree() when not streaming.
   std::string PendingDecls;
   std::size_t DeclNodes = 0;
+  std::size_t UnfinishedNodes = 0;
   void writeDeclNode(const std::string &Node);
 };
 

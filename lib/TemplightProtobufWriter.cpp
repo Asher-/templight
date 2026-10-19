@@ -13,9 +13,15 @@
 #include "ThinProtobuf.h"
 #include "llvm/ADT/StringExtras.h"
 
+#include <llvm/Config/llvm-config.h>
 #include <llvm/Support/Compression.h>
 #include <llvm/Support/Error.h>
 #include <llvm/Support/raw_ostream.h>
+
+#ifdef LLVM_ON_UNIX
+#include <sys/stat.h>
+#include <unistd.h>
+#endif
 
 #include <cstdint>
 #include <string>
@@ -29,37 +35,63 @@ static const unsigned StreamedLengthWidth = 5;
 
 TemplightProtobufWriter::TemplightProtobufWriter(llvm::raw_ostream &aOS,
                                                  int aCompressLevel,
-                                                 bool aStreaming)
+                                                 bool aStreaming, int aFD)
     : TemplightWriter(aOS), compressionMode(aCompressLevel),
-      Streaming(aStreaming) {}
+      Streaming(aStreaming), FD(aFD) {}
+
+std::string TemplightProtobufWriter::traceBytes(llvm::StringRef Field) const {
+  if (Seekable)
+    return Field.str();
+  // repeated TemplightTrace traces = 1; one record per append, which
+  // TemplightProtobufReader reads on as the same trace.
+  std::string Record;
+  llvm::raw_string_ostream OS(Record);
+  llvm::protobuf::saveString(OS, 1, Field);
+  return Record;
+}
 
 void TemplightProtobufWriter::appendToTrace(llvm::StringRef Field) {
   if (!Streaming) {
     buffer.append(Field.data(), Field.size());
     return;
   }
-  if (!Seekable) {
-    // repeated TemplightTrace traces = 1; one record per append, which
-    // TemplightProtobufReader reads on as the same trace.
-    llvm::protobuf::saveString(OutputOS, 1, Field);
-    OutputOS.flush();
-    return;
-  }
-  OutputOS << Field;
+  OutputOS << traceBytes(Field);
   OutputOS.flush();
+  if (!Seekable)
+    return;
   BodySize += Field.size();
-  patchLength();
+  patchLength(BodySize);
 }
 
-void TemplightProtobufWriter::patchLength() {
-  if (BodySize >> (7 * StreamedLengthWidth))
+// Called from the crash handler too, so it only computes and writes.
+void TemplightProtobufWriter::patchLength(std::uint64_t Size) {
+  if (Size >> (7 * StreamedLengthWidth))
     return; // Too long for the field: the last written length stays valid.
   char Length[StreamedLengthWidth];
   for (unsigned I = 0; I < StreamedLengthWidth; ++I)
-    Length[I] = static_cast<char>(((BodySize >> (7 * I)) & 0x7F) |
+    Length[I] = static_cast<char>(((Size >> (7 * I)) & 0x7F) |
                                   (I + 1 < StreamedLengthWidth ? 0x80 : 0));
+#ifdef LLVM_ON_UNIX
+  // pwrite leaves the file offset where it is, so a crash amid it cannot
+  // misplace what the crash closing appends.
+  if (FD >= 0) {
+    (void)::pwrite(FD, Length, StreamedLengthWidth, LengthOffset);
+    return;
+  }
+#endif
   static_cast<llvm::raw_fd_ostream &>(OutputOS).pwrite(
       Length, StreamedLengthWidth, LengthOffset);
+}
+
+void TemplightProtobufWriter::writeCrashClosing() {
+  TemplightWriter::writeCrashClosing();
+#ifdef LLVM_ON_UNIX
+  // Each field is written with one write, so the file ends with a whole one.
+  struct stat Status;
+  if (Streaming && Seekable && FD >= 0 && ::fstat(FD, &Status) == 0 &&
+      std::uint64_t(Status.st_size) >= LengthOffset + StreamedLengthWidth)
+    patchLength(Status.st_size - LengthOffset - StreamedLengthWidth);
+#endif
 }
 
 void TemplightProtobufWriter::initialize(const std::string &aSourceName) {
@@ -89,15 +121,19 @@ void TemplightProtobufWriter::initialize(const std::string &aSourceName) {
   }
 
   if (Streaming) {
-    Seekable = OutputOS.get_kind() == llvm::raw_ostream::OStreamKind::OK_FDStream &&
+    // A descriptor comes only with the raw_fd_ostream that writes its file;
+    // raw_fd_ostream itself reports OK_OStream, so its kind cannot tell.
+    Seekable = FD >= 0 &&
                static_cast<llvm::raw_fd_ostream &>(OutputOS).supportsSeeking();
     if (Seekable) {
       // repeated TemplightTrace traces = 1; its length is patched in place.
-      llvm::protobuf::saveVarInt(OutputOS,
-                                 llvm::protobuf::getStringWire<1>::value);
-      LengthOffset = OutputOS.tell();
-      OutputOS << std::string(StreamedLengthWidth, '\0');
-      patchLength();
+      std::string Head;
+      llvm::raw_string_ostream OS(Head);
+      llvm::protobuf::saveVarInt(OS, llvm::protobuf::getStringWire<1>::value);
+      LengthOffset = OutputOS.tell() + Head.size();
+      OS << std::string(StreamedLengthWidth, '\0');
+      OutputOS << Head;
+      patchLength(BodySize);
     }
   }
   appendToTrace(hdr_field);
@@ -433,8 +469,8 @@ void TemplightProtobufWriter::printEntry(
 
 namespace clang {
 
-void TemplightProtobufWriter::appendEntry(unsigned OneofField,
-                                          const std::string &Contents) {
+std::string TemplightProtobufWriter::entryField(unsigned OneofField,
+                                                const std::string &Contents) {
   std::string oneof_contents;
   {
     llvm::raw_string_ostream OS_inner(oneof_contents);
@@ -448,10 +484,15 @@ void TemplightProtobufWriter::appendEntry(unsigned OneofField,
     // repeated TemplightEntry entries = 2;
     llvm::protobuf::saveString(OS, 2, oneof_contents);
   }
-  appendToTrace(entry_field);
+  return entry_field;
 }
 
-void TemplightProtobufWriter::printDeclRead(
+void TemplightProtobufWriter::appendEntry(unsigned OneofField,
+                                          const std::string &Contents) {
+  appendToTrace(entryField(OneofField, Contents));
+}
+
+std::string TemplightProtobufWriter::declReadContents(
     const PrintableTemplightEntryDeclRead &aEntry) {
 
   std::string entry_contents;
@@ -472,7 +513,18 @@ void TemplightProtobufWriter::printDeclRead(
     llvm::protobuf::saveString(OS_inner, 3, aEntry.ModuleName);
     llvm::protobuf::saveVarInt(OS_inner, 4, aEntry.StackDepthKB);
   }
-  appendEntry(3, entry_contents); // decl_read
+  return entry_contents;
+}
+
+void TemplightProtobufWriter::printDeclRead(
+    const PrintableTemplightEntryDeclRead &aEntry) {
+  appendEntry(3, declReadContents(aEntry)); // decl_read
+}
+
+std::string TemplightProtobufWriter::unfinishedDeclReadText(
+    const PrintableTemplightEntryDeclRead &aEntry) {
+  // unfinished_decl_read
+  return traceBytes(entryField(5, declReadContents(aEntry)));
 }
 
 void TemplightProtobufWriter::printMergedDecl(

@@ -44,6 +44,7 @@ private:
   std::vector<std::pair<const Decl *, unsigned>> DeclReads;
   std::vector<std::string> ReadModuleNames;
   llvm::StringMap<unsigned> ReadModuleIndex;
+  bool Initialized = false;
   bool Finalized = false;
 
 public:
@@ -73,6 +74,17 @@ public:
   /// \p ModuleName, \p StackDepthKB below the base of the stack it ran on.
   void declRead(const Decl *D, llvm::StringRef ModuleName,
                 std::uint64_t StackDepthKB);
+
+  /// -deserialization, under -safe-mode: the ASTReader began reading \p D,
+  /// of which only its kind and declaration name are read, from a module file
+  /// of module \p ModuleName, \p StackDepthKB below the base of its stack.
+  /// Until declReadEnded(), a crash writes it as an unfinished read. Returns
+  /// whether the read was recorded, and so needs declReadEnded().
+  bool declReadBegun(const NamedDecl *D, llvm::StringRef ModuleName,
+                     std::uint64_t StackDepthKB);
+  /// The innermost read declReadBegun() recorded is finished; declRead() has
+  /// written its entry.
+  void declReadEnded();
 
 private:
   void printMergedDecls();

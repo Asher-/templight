@@ -43,7 +43,9 @@ public:
     EndEntry,
     Other,
     DeclReadEntry,
-    MergedDeclEntry
+    MergedDeclEntry,
+    // In LastDeclRead: a read a crash cut short.
+    UnfinishedDeclReadEntry
   } LastChunk;
 
   unsigned int Version;

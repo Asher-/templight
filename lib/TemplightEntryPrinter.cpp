@@ -88,15 +88,17 @@ TemplightEntryPrinter::TemplightEntryPrinter(const std::string &Output)
   if (Output == "-") {
     TraceOS = &llvm::outs();
   } else {
-    std::error_code error;
-    TraceOS = new llvm::raw_fd_ostream(Output, error, llvm::sys::fs::OF_None);
+    int FD;
+    std::error_code error = llvm::sys::fs::openFileForWrite(
+        Output, FD, llvm::sys::fs::CD_CreateAlways, llvm::sys::fs::OF_None);
     if (error) {
       llvm::errs() << "Error: [Templight] Can not open file to write trace of "
                       "template instantiations: "
                    << Output << " Error: " << error.message();
-      TraceOS = 0;
       return;
     }
+    TraceFD = FD;
+    TraceOS = new llvm::raw_fd_ostream(FD, /*shouldClose=*/true);
   }
 }
 
@@ -115,6 +117,8 @@ llvm::raw_ostream *TemplightEntryPrinter::getTraceStream() const {
   return TraceOS;
 }
 
+int TemplightEntryPrinter::getTraceFD() const { return TraceFD; }
+
 void TemplightEntryPrinter::takeWriter(TemplightWriter *aPWriter) {
   p_writer.reset(aPWriter);
 }
@@ -123,7 +127,20 @@ TemplightWriter *TemplightEntryPrinter::getWriter() const {
   return p_writer.get();
 }
 
+TemplightWriter::~TemplightWriter() {
+  while (InnermostCrashText.load())
+    retireCrashText();
+}
+
+bool TemplightWriter::writeOpenCrashTexts() {
+  const CrashText *Innermost = InnermostCrashText.load();
+  for (const CrashText *T = Innermost; T; T = T->Outer)
+    OutputOS.write(T->Text.data(), T->Text.size());
+  return Innermost != nullptr;
+}
+
 void TemplightWriter::writeCrashClosing() {
+  writeOpenCrashTexts();
   int Active = ActiveCrashClosing.load();
   if (Active < 0)
     return;
@@ -136,6 +153,32 @@ void TemplightWriter::setCrashClosing(std::string Text) {
   CrashClosing[Next] = std::move(Text);
   ActiveCrashClosing.store(Next);
 }
+
+TemplightWriter::CrashText *
+TemplightWriter::prepareCrashText(std::string Text) {
+  return new CrashText{std::move(Text)};
+}
+
+void TemplightWriter::publishCrashText(CrashText *Text) {
+  Text->Outer = InnermostCrashText.load();
+  InnermostCrashText.store(Text);
+}
+
+void TemplightWriter::retireCrashText() {
+  const CrashText *Innermost = InnermostCrashText.load();
+  if (!Innermost)
+    return;
+  InnermostCrashText.store(Innermost->Outer);
+  delete Innermost;
+}
+
+void TemplightWriter::beginDeclRead(
+    const PrintableTemplightEntryDeclRead &Entry) {
+  // Nothing is written as the read begins, so the text is published at once.
+  publishCrashText(prepareCrashText(unfinishedDeclReadText(Entry)));
+}
+
+void TemplightWriter::endDeclRead() { retireCrashText(); }
 
 void TemplightEntryPrinter::readBlacklists(const std::string &BLFilename) {
   if (BLFilename.empty()) {

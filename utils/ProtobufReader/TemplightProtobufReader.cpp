@@ -346,6 +346,10 @@ TemplightProtobufReader::LastChunkType TemplightProtobufReader::next() {
     case llvm::protobuf::getStringWire<4>::value:
       loadMergedDecl(sub_buffer);
       break;
+    case llvm::protobuf::getStringWire<5>::value:
+      loadDeclRead(sub_buffer);
+      LastChunk = TemplightProtobufReader::UnfinishedDeclReadEntry;
+      break;
     default: // ignore for fwd-compat.
       break;
     };

@@ -41,6 +41,8 @@ public:
   bool isValid() const;
 
   llvm::raw_ostream *getTraceStream() const;
+  /// The descriptor of the trace file, or -1 when the trace goes to stdout.
+  int getTraceFD() const;
   void takeWriter(TemplightWriter *aPWriter);
   TemplightWriter *getWriter() const;
 
@@ -52,6 +54,7 @@ private:
   std::unique_ptr<llvm::Regex> IdRegex;
 
   llvm::raw_ostream *TraceOS;
+  int TraceFD = -1;
 
   std::unique_ptr<TemplightWriter> p_writer;
 };

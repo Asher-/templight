@@ -55,10 +55,12 @@ struct PrintableTemplightEntryMergedDecl {
   std::vector<std::string> ModuleNames;
 };
 
+/// Writes a trace in one format. Each entry is formatted in memory and written
+/// with one write, so that a crash leaves every entry whole or absent.
 class TemplightWriter {
 public:
   TemplightWriter(llvm::raw_ostream &aOS) : OutputOS(aOS){};
-  virtual ~TemplightWriter(){};
+  virtual ~TemplightWriter();
 
   virtual void initialize(const std::string &aSourceName = "") = 0;
   virtual void finalize() = 0;
@@ -71,15 +73,45 @@ public:
   virtual void printDeclRead(const PrintableTemplightEntryDeclRead &) {}
   virtual void printMergedDecl(const PrintableTemplightEntryMergedDecl &) {}
 
-  /// Writes the text that closes the trace written so far. Called from the
-  /// signal handler of a crashing compiler, so it only writes a buffer that
-  /// setCrashClosing() prepared in advance.
+  /// -deserialization, under -safe-mode: the read of \p Entry's declaration
+  /// has begun. Until endDeclRead(), a crash writes it as an unfinished read.
+  void beginDeclRead(const PrintableTemplightEntryDeclRead &Entry);
+  /// The innermost read beginDeclRead() began is finished.
+  void endDeclRead();
+
+  /// Writes what the trace written so far needs to be complete in its format:
+  /// the crash text of each element still open, innermost first, then the
+  /// trace's own closing. Called from the signal handler of a crashing
+  /// compiler, so it only writes text prepared in advance.
   virtual void writeCrashClosing();
 
 protected:
-  /// Sets the text writeCrashClosing() writes: what the trace needs after
-  /// the entries written so far to be complete in its format.
+  /// Sets the trace's own closing, which a crash writes after the crash text
+  /// of every open element.
   void setCrashClosing(std::string Text);
+
+  /// What a crash writes for an element that opens now and closes before
+  /// every element open before it.
+  struct CrashText {
+    std::string Text;
+    const CrashText *Outer = nullptr;
+  };
+  /// Prepared before the element's opening is written, published once it is
+  /// and retired once the element's own closing is written, so that a crash at
+  /// any point finds the crash texts that match what the file holds.
+  static CrashText *prepareCrashText(std::string Text);
+  void publishCrashText(CrashText *Text);
+  void retireCrashText();
+  /// Writes the crash text of each open element, innermost first, and returns
+  /// whether there was any.
+  bool writeOpenCrashTexts();
+
+  /// -deserialization, under -safe-mode: what a crash writes for a read still
+  /// under way. A format that does not record reads writes nothing.
+  virtual std::string
+  unfinishedDeclReadText(const PrintableTemplightEntryDeclRead &) {
+    return "";
+  }
 
   llvm::raw_ostream &OutputOS;
 
@@ -87,6 +119,9 @@ private:
   // Two buffers, so that a signal handler never reads the one being rewritten.
   std::string CrashClosing[2];
   std::atomic<int> ActiveCrashClosing{-1};
+  // The open elements' crash texts, innermost first. A published text does not
+  // change until it is retired.
+  std::atomic<const CrashText *> InnermostCrashText{nullptr};
 };
 
 } // namespace clang

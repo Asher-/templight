@@ -39,13 +39,19 @@ private:
   /// whose length is a fixed-width varint at LengthOffset, rewritten after
   /// every append. Otherwise each append is a TemplightTrace record of its own.
   bool Seekable = false;
+  int FD = -1;
   std::uint64_t LengthOffset = 0;
   std::uint64_t BodySize = 0;
 
   void appendToTrace(llvm::StringRef Field);
+  /// What appendToTrace() writes for Field.
+  std::string traceBytes(llvm::StringRef Field) const;
+  // The TemplightEntry field whose field 'OneofField' holds 'Contents'.
+  std::string entryField(unsigned OneofField, const std::string &Contents);
   // Appends a TemplightEntry whose field 'OneofField' holds 'Contents'.
   void appendEntry(unsigned OneofField, const std::string &Contents);
-  void patchLength();
+  void patchLength(std::uint64_t Size);
+  std::string declReadContents(const PrintableTemplightEntryDeclRead &aEntry);
 
   std::size_t createDictionaryEntry(const std::string &Name);
   std::string printEntryLocation(const std::string &FileName, int Line,
@@ -53,8 +59,10 @@ private:
   std::string printTemplateName(const std::string &Name);
 
 public:
+  /// \p aFD is the descriptor of the file aOS writes, or -1 if unknown; a
+  /// streamed trace in a file records its length through it.
   TemplightProtobufWriter(llvm::raw_ostream &aOS, int aCompressLevel = 2,
-                          bool aStreaming = false);
+                          bool aStreaming = false, int aFD = -1);
 
   void initialize(const std::string &aSourceName = "") override;
   void finalize() override;
@@ -64,6 +72,14 @@ public:
   void printDeclRead(const PrintableTemplightEntryDeclRead &aEntry) override;
   void
   printMergedDecl(const PrintableTemplightEntryMergedDecl &aEntry) override;
+
+  /// Also, in a seekable file, sets the trace's length to cover every field
+  /// in the file, the last of which may be written before its length was.
+  void writeCrashClosing() override;
+
+protected:
+  std::string unfinishedDeclReadText(
+      const PrintableTemplightEntryDeclRead &aEntry) override;
 };
 
 } // namespace clang

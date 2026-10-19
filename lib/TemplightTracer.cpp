@@ -35,6 +35,10 @@
 #endif
 #ifdef __APPLE__
 #include <pthread/introspection.h>
+#elif defined(LLVM_ON_UNIX)
+#include <cerrno>
+#include <dlfcn.h>
+#include <pthread.h>
 #endif
 
 #include <atomic>
@@ -331,7 +335,8 @@ const char *TemplightTracer::formatExtension(const std::string &Format) {
 }
 
 static TemplightWriter *createWriter(const std::string &Format,
-                                     llvm::raw_ostream &OS, bool Safemode) {
+                                     llvm::raw_ostream &OS, int FD,
+                                     bool Safemode) {
   if (Format == "yaml")
     return new TemplightYamlWriter(OS);
   if (Format == "xml")
@@ -345,7 +350,7 @@ static TemplightWriter *createWriter(const std::string &Format,
   if (Format == "graphviz")
     return new TemplightGraphVizWriter(OS, /*aStreaming=*/Safemode);
   return new TemplightProtobufWriter(OS, /*aCompressLevel=*/2,
-                                     /*aStreaming=*/Safemode);
+                                     /*aStreaming=*/Safemode, FD);
 }
 
 namespace {
@@ -385,8 +390,8 @@ TemplightTracer::TemplightTracer(const Sema &TheSema, std::string Output,
   if (Safemode)
     Printer->getTraceStream()->SetUnbuffered();
 
-  Printer->takeWriter(
-      createWriter(Format, *Printer->getTraceStream(), Safemode));
+  Printer->takeWriter(createWriter(Format, *Printer->getTraceStream(),
+                                   Printer->getTraceFD(), Safemode));
 
   // In safe-mode a crash also writes what the format needs after the last
   // entry (closing tags, the end of the graph), so the trace stays readable.
@@ -408,6 +413,7 @@ TemplightTracer::~TemplightTracer() {
 void TemplightTracer::initialize(const Sema &) {
   if (Printer)
     Printer->startTrace();
+  Initialized = true;
 }
 
 void TemplightTracer::finalize(const Sema &) {
@@ -437,6 +443,34 @@ PrintableTemplightEntryDeclRead describeDecl(const Decl *D) {
     llvm::raw_string_ostream OS(Entry.Name);
     ND->getNameForDiagnostic(OS, D->getASTContext().getPrintingPolicy(),
                              /*Qualified=*/true);
+  }
+  Entry.StackDepthKB = 0;
+  return Entry;
+}
+
+// The kind and declaration name of D, whose read has begun. The rest of D (its
+// context, its type, its template arguments) may not be read yet, so names that
+// would print a type are given by their kind.
+PrintableTemplightEntryDeclRead describeUnfinishedDecl(const NamedDecl *D) {
+  PrintableTemplightEntryDeclRead Entry;
+  Entry.Kind = D->getDeclKindName();
+  DeclarationName Name = D->getDeclName();
+  switch (Name.getNameKind()) {
+  case DeclarationName::CXXConstructorName:
+    Entry.Name = "(constructor)";
+    break;
+  case DeclarationName::CXXDestructorName:
+    Entry.Name = "(destructor)";
+    break;
+  case DeclarationName::CXXConversionFunctionName:
+    Entry.Name = "(conversion function)";
+    break;
+  case DeclarationName::CXXDeductionGuideName:
+    Entry.Name = "(deduction guide)";
+    break;
+  default:
+    Entry.Name = Name.getAsString();
+    break;
   }
   Entry.StackDepthKB = 0;
   return Entry;
@@ -495,6 +529,54 @@ void giveStartingThreadCrashSignalStack(unsigned int Event, pthread_t Thread,
 } // namespace
 #endif
 
+#if defined(LLVM_ON_UNIX) && !defined(__APPLE__)
+namespace {
+// Set by the first installTemplightCrashSignalStack(): threads started after
+// it get their alternate signal stack as they start.
+std::atomic<bool> GiveStartingThreadsCrashSignalStack{false};
+
+struct ThreadStart {
+  void *(*Routine)(void *);
+  void *Arg;
+};
+
+void *startWithCrashSignalStack(void *Start) {
+  ThreadStart S = *static_cast<ThreadStart *>(Start);
+  delete static_cast<ThreadStart *>(Start);
+  installTemplightCrashSignalStack();
+  return S.Routine(S.Arg);
+}
+} // namespace
+
+#if defined(__GLIBC__)
+#define TEMPLIGHT_PTHREAD_CREATE_NOEXCEPT noexcept
+#else
+#define TEMPLIGHT_PTHREAD_CREATE_NOEXCEPT
+#endif
+
+// Off Darwin there is no hook on thread start, so templight interposes
+// pthread_create. A thread clang starts (with llvm::runOnNewStack, to go on
+// with a deep recursion or to build a module) can overflow before it writes
+// any trace entry, so it gets its alternate signal stack as it starts.
+extern "C" int pthread_create(pthread_t *Thread, const pthread_attr_t *Attr,
+                              void *(*Routine)(void *),
+                              void *Arg) TEMPLIGHT_PTHREAD_CREATE_NOEXCEPT {
+  using CreateFn =
+      int (*)(pthread_t *, const pthread_attr_t *, void *(*)(void *), void *);
+  static CreateFn Create =
+      reinterpret_cast<CreateFn>(dlsym(RTLD_NEXT, "pthread_create"));
+  if (!Create)
+    return EAGAIN;
+  if (!GiveStartingThreadsCrashSignalStack.load())
+    return Create(Thread, Attr, Routine, Arg);
+  ThreadStart *Start = new ThreadStart{Routine, Arg};
+  int Result = Create(Thread, Attr, startWithCrashSignalStack, Start);
+  if (Result != 0)
+    delete Start;
+  return Result;
+}
+#endif
+
 void installTemplightCrashSignalStack() {
   static thread_local ThreadCrashSignalStack Stack;
   (void)Stack;
@@ -504,6 +586,8 @@ void installTemplightCrashSignalStack() {
     PreviousThreadHook =
         pthread_introspection_hook_install(giveStartingThreadCrashSignalStack);
   });
+#elif defined(LLVM_ON_UNIX)
+  GiveStartingThreadsCrashSignalStack.store(true);
 #endif
 }
 
@@ -523,6 +607,25 @@ void TemplightTracer::declRead(const Decl *D, llvm::StringRef ModuleName,
   if (SafeModeFlag)
     installTemplightCrashSignalStack();
   Printer->getWriter()->printDeclRead(Entry);
+}
+
+bool TemplightTracer::declReadBegun(const NamedDecl *D,
+                                    llvm::StringRef ModuleName,
+                                    std::uint64_t StackDepthKB) {
+  // A read before the trace's opening, or after its end, has nothing to close.
+  if (!Printer || !SafeModeFlag || !Initialized || Finalized)
+    return false;
+  PrintableTemplightEntryDeclRead Entry = describeUnfinishedDecl(D);
+  Entry.ModuleName = ModuleName.str();
+  Entry.StackDepthKB = StackDepthKB;
+  installTemplightCrashSignalStack();
+  Printer->getWriter()->beginDeclRead(Entry);
+  return true;
+}
+
+void TemplightTracer::declReadEnded() {
+  if (Printer)
+    Printer->getWriter()->endDeclRead();
 }
 
 void TemplightTracer::printMergedDecls() {

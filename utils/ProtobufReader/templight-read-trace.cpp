@@ -52,7 +52,11 @@ int main() {
       OS << "end\n";
       break;
     case TemplightProtobufReader::DeclReadEntry:
-      OS << "decl-read kind=" << Reader.LastDeclRead.Kind
+    case TemplightProtobufReader::UnfinishedDeclReadEntry:
+      OS << (Chunk == TemplightProtobufReader::DeclReadEntry
+                 ? "decl-read"
+                 : "unfinished-decl-read")
+         << " kind=" << Reader.LastDeclRead.Kind
          << " name=" << Reader.LastDeclRead.Name
          << " module=" << Reader.LastDeclRead.ModuleName
          << " stack-kb=" << Reader.LastDeclRead.StackDepthKB << "\n";
