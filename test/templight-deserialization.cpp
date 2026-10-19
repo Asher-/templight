@@ -1,13 +1,21 @@
 // -deserialization writes one entry per declaration read from a module file,
 // and at the end of the translation unit one entry for each declaration read
 // from two or more module files. DeserA and DeserB each hold their own copy of
-// Chain<3>, so its trace names both of their module files.
+// Chain<3>, so its trace names both of their module files. utils/ProtobufReader
+// (templight-read-trace) reads the protobuf entries, buffered and streamed.
 // RUN: rm -rf %t && mkdir -p %t
 // RUN: %templight_cc1 -std=c++17 -fmodules -fimplicit-module-maps \
 // RUN:   -fmodules-cache-path=%t/cache -I %S/Inputs/deserialization \
 // RUN:   -fsyntax-only %s -Xtemplight -profiler -Xtemplight -deserialization \
 // RUN:   -Xtemplight -output=%t/t.trace.pbf
 // RUN: %python %S/Inputs/read-trace.py < %t/t.trace.pbf | FileCheck %s
+// RUN: templight-read-trace < %t/t.trace.pbf | FileCheck %s
+// RUN: %templight_cc1 -std=c++17 -fmodules -fimplicit-module-maps \
+// RUN:   -fmodules-cache-path=%t/cache -I %S/Inputs/deserialization \
+// RUN:   -fsyntax-only %s -Xtemplight -profiler -Xtemplight -deserialization \
+// RUN:   -Xtemplight -safe-mode -Xtemplight -output=%t/t.trace.safe.pbf
+// RUN: %python %S/Inputs/read-trace.py < %t/t.trace.safe.pbf | FileCheck %s
+// RUN: templight-read-trace < %t/t.trace.safe.pbf | FileCheck %s
 // RUN: %templight_cc1 -std=c++17 -fmodules -fimplicit-module-maps \
 // RUN:   -fmodules-cache-path=%t/cache -I %S/Inputs/deserialization \
 // RUN:   -fsyntax-only %s -Xtemplight -profiler -Xtemplight -deserialization \

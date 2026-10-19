@@ -1,8 +1,10 @@
-// -format=protobuf (the default) writes the trace in the protobuf format.
+// -format=protobuf (the default) writes the trace in the protobuf format, which
+// utils/ProtobufReader (templight-read-trace) reads.
 // RUN: rm -f %t.trace.pbf
 // RUN: %templight_cc1 -fsyntax-only %s -Xtemplight -profiler \
 // RUN:   -Xtemplight -format=protobuf -Xtemplight -output=%t.trace.pbf
 // RUN: %python %S/Inputs/read-trace.py < %t.trace.pbf | FileCheck %s
+// RUN: templight-read-trace < %t.trace.pbf | FileCheck %s
 
 template <int N> struct Square {
   static const int value = N * N;

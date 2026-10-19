@@ -16,6 +16,7 @@ set(TEMPLIGHT_TEST_DEPS
   ${CLANG_TEST_DEPS}
   TemplightUnitTests
   templight
+  templight-read-trace
   llvm-config
   FileCheck
   count
