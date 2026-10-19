@@ -81,7 +81,8 @@ private:
 /// Gives the calling thread an alternate signal stack, once per thread, so that
 /// the handler closing a -safe-mode trace can run after that thread's stack
 /// overflows. Signal stacks are per thread, and clang runs deep recursion on
-/// threads of its own.
+/// threads of its own. On Darwin, every thread started after the first call
+/// also gets one as it starts.
 void installTemplightCrashSignalStack();
 
 } // namespace clang

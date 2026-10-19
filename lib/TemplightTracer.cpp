@@ -33,6 +33,9 @@
 #ifdef LLVM_ON_UNIX
 #include <signal.h>
 #endif
+#ifdef __APPLE__
+#include <pthread/introspection.h>
+#endif
 
 #include <atomic>
 #include <cstdint>
@@ -474,9 +477,34 @@ struct ThreadCrashSignalStack {
 };
 } // namespace
 
+#ifdef __APPLE__
+namespace {
+pthread_introspection_hook_t PreviousThreadHook = nullptr;
+
+// Darwin calls this on each thread as it starts. A thread clang starts (with
+// llvm::runOnNewStack, to go on with a deep recursion or to build a module)
+// can overflow before it writes any trace entry, so it gets its alternate
+// signal stack as it starts.
+void giveStartingThreadCrashSignalStack(unsigned int Event, pthread_t Thread,
+                                        void *Addr, size_t Size) {
+  if (Event == PTHREAD_INTROSPECTION_THREAD_START)
+    installTemplightCrashSignalStack();
+  if (PreviousThreadHook)
+    PreviousThreadHook(Event, Thread, Addr, Size);
+}
+} // namespace
+#endif
+
 void installTemplightCrashSignalStack() {
   static thread_local ThreadCrashSignalStack Stack;
   (void)Stack;
+#ifdef __APPLE__
+  static std::once_flag HookInstalled;
+  std::call_once(HookInstalled, [] {
+    PreviousThreadHook =
+        pthread_introspection_hook_install(giveStartingThreadCrashSignalStack);
+  });
+#endif
 }
 
 void TemplightTracer::declRead(const Decl *D, llvm::StringRef ModuleName,
