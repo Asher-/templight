@@ -120,6 +120,7 @@ set(TEMPLIGHT_BINARY_DIR "${CMAKE_CURRENT_BINARY_DIR}")
 
 if(CLANG_INCLUDE_TESTS)
 add_subdirectory(utils/ProtobufReader)
+add_subdirectory(utils/IllegalInstructionPlugin)
 add_subdirectory(test)
 add_subdirectory(unittests)
 endif()

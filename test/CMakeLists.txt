@@ -22,6 +22,9 @@ set(TEMPLIGHT_TEST_DEPS
   count
   not
 )
+if(TARGET TemplightIllegalInstruction)
+  list(APPEND TEMPLIGHT_TEST_DEPS TemplightIllegalInstruction)
+endif()
 
 set(TEMPLIGHT_TEST_EXTRA_ARGS "")
 
