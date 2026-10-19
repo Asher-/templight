@@ -1,8 +1,8 @@
 // Under -safe-mode, a compilation whose stack overflows inside clang's module
 // reader leaves a complete trace that holds each declaration read before the
 // overflow. Reading P recurses through 100000 pointer types. A declaration's
-// entry is written when its read completes, so P, whose read the overflow
-// cuts short, has none.
+// entry is written when its read completes; P, whose read the overflow cuts
+// short, is named as an unfinished read, with the stack depth at its start.
 // UNSUPPORTED: system-windows
 // RUN: rm -rf %t && mkdir -p %t
 // RUN: %python %S/Inputs/make-deep-module.py %t/deep 100 100000
@@ -34,8 +34,15 @@ P B;
 // XML-NEXT: <Module>Deep</Module>
 // XML-NEXT: <StackDepth kb = "{{[0-9]+}}"/>
 // XML-NOT: <Name>P</Name>
+// XML: <UnfinishedDeclRead>
+// XML-NEXT: <Kind>Typedef</Kind>
+// XML-NEXT: <Name>P</Name>
+// XML-NEXT: <Module>Deep</Module>
+// XML-NEXT: <StackDepth kb = "{{[0-9]+}}"/>
+// XML-NEXT: </UnfinishedDeclRead>
 // XML: </Trace>
 
 // NESTEDXML: Name="T100" Module="Deep" StackDepthKB="{{[0-9]+}}"/>
 // NESTEDXML-NOT: Name="P"
-// NESTEDXML: </Trace>
+// NESTEDXML: <UnfinishedDeclRead Kind="Typedef" Name="P" Module="Deep"
+// StackDepthKB="{{[0-9]+}}"/> NESTEDXML: </Trace>

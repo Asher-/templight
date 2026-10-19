@@ -27,6 +27,7 @@
 
 #include <algorithm>
 #include <cstdint>
+#include <vector>
 
 #if defined(__APPLE__) || defined(__linux__)
 #include <pthread.h>
@@ -57,30 +58,51 @@ static std::uint64_t currentStackDepthKB() {
   return Base > SP ? (Base - SP) / 1024 : 0;
 }
 
+// The module of a module file; a precompiled header has none, so its file
+// names it.
+static StringRef moduleName(const serialization::ModuleFile &MF) {
+  return MF.ModuleName.empty() ? StringRef(MF.FileName)
+                               : StringRef(MF.ModuleName);
+}
+
 // Reports each declaration the ASTReader reads to the tracer, with the module
-// of the module file it came from and the stack depth at the read.
+// of the module file it came from and the stack depth at the read, and under
+// -safe-mode each read as it begins, so that a crash names the reads under way.
 class TemplightDeserializationListener : public ASTDeserializationListener {
 public:
   // Starts reporting to \p T, or stops when \p T is null.
-  void connect(TemplightTracer *T) { Tracer = T; }
+  void connect(TemplightTracer *T) {
+    Tracer = T;
+    Unfinished.clear();
+  }
 
   void ReaderInitialized(ASTReader *R) override { Reader = R; }
 
-  void DeclRead(GlobalDeclID, const Decl *D) override {
+  void DeclReadStarted(GlobalDeclID ID, const NamedDecl *D) override {
     if (!Tracer || !Reader || !D)
       return;
     serialization::ModuleFile *MF = Reader->getOwningModuleFile(D);
-    if (!MF)
-      return;
-    // A precompiled header has no module name, so its file names it.
-    StringRef Module =
-        MF->ModuleName.empty() ? MF->FileName.str() : StringRef(MF->ModuleName);
-    Tracer->declRead(D, Module, currentStackDepthKB());
+    if (MF && Tracer->declReadBegun(D, moduleName(*MF), currentStackDepthKB()))
+      Unfinished.push_back(ID);
+  }
+
+  void DeclRead(GlobalDeclID ID, const Decl *D) override {
+    if (Tracer && Reader && D)
+      if (serialization::ModuleFile *MF = Reader->getOwningModuleFile(D))
+        Tracer->declRead(D, moduleName(*MF), currentStackDepthKB());
+    // Its entry is written, so the read is no longer under way.
+    if (!Unfinished.empty() && Unfinished.back() == ID) {
+      Unfinished.pop_back();
+      if (Tracer)
+        Tracer->declReadEnded();
+    }
   }
 
 private:
   ASTReader *Reader = nullptr;
   TemplightTracer *Tracer = nullptr;
+  // The reads declReadBegun() recorded and not yet ended, innermost last.
+  std::vector<GlobalDeclID> Unfinished;
 };
 
 namespace {

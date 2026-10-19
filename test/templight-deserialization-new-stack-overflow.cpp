@@ -6,7 +6,6 @@
 // stack before the thread writes any entry. The crash handler can only run on
 // that thread's alternate signal stack, which the thread gets as it starts.
 // UNSUPPORTED: system-windows
-// REQUIRES: system-darwin
 // RUN: rm -rf %t && mkdir -p %t
 // RUN: %python %S/Inputs/make-deep-module.py %t/deep 5000 100000
 // RUN: not --crash %templight_cc1 -std=c++17 -fmodules \
