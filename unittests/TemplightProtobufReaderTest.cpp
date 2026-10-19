@@ -11,6 +11,8 @@
 #include "PrintableTemplightEntries.h"
 #include "TemplightProtobufWriter.h"
 
+#include "llvm/Support/FileSystem.h"
+#include "llvm/Support/MemoryBuffer.h"
 #include "llvm/Support/raw_ostream.h"
 #include "gtest/gtest.h"
 
@@ -86,3 +88,35 @@ TEST(TemplightProtobufReader, ReadsAStreamedPipeTraceAsOneTrace) {
 }
 
 } // namespace
+
+// A -safe-mode trace written to a file patches its length in place after each
+// entry, so the file is one trace that the reader reads whole, and so is the
+// file a crash leaves before the trace is finalized.
+TEST(TemplightProtobufReader, ReadsAStreamedFileTraceFinishedOrCutShort) {
+  for (bool Finish : {true, false}) {
+    llvm::SmallString<128> Path;
+    ASSERT_FALSE(llvm::sys::fs::createTemporaryFile("templight", "pbf", Path));
+    {
+      std::error_code EC;
+      llvm::raw_fd_ostream OS(Path, EC);
+      ASSERT_FALSE(EC);
+      TemplightProtobufWriter Writer(OS, /*aCompressLevel=*/2,
+                                     /*aStreaming=*/true);
+      Writer.initialize("trace-source.cpp");
+      Writer.printEntry(beginEntry("Square<3>", 7));
+      Writer.printEntry(PrintableTemplightEntryEnd{});
+      Writer.printEntry(beginEntry("Square<2>", 8));
+      Writer.printEntry(PrintableTemplightEntryEnd{});
+      if (Finish)
+        Writer.finalize();
+    }
+    auto Buffer = llvm::MemoryBuffer::getFile(Path);
+    ASSERT_TRUE(bool(Buffer));
+    std::string SourceName;
+    EXPECT_EQ(readBegins((*Buffer)->getBuffer().str(), SourceName),
+              ExpectedBegins)
+        << (Finish ? "finished" : "cut short");
+    EXPECT_EQ(SourceName, "trace-source.cpp");
+    llvm::sys::fs::remove(Path);
+  }
+}
